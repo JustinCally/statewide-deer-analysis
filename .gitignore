@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+outputs
+stan/count_det_non_det_rn
+stan/count_only
+stan/count_det_non_det_rn_gp
