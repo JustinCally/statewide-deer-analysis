@@ -44,10 +44,10 @@ detection_assign <- function(sp, species, othersp) {
 
   sf_m <- dplyr::mutate(sp, across(c(Pellet, Footprint, Rubbing, Wallow),
                                    ~ dplyr::case_when(.x == 0 ~ 0,
-                                                      .x == 1 & !! sym(species) == 1 ~ 1,
-                                                      .x == 1 & !! sym(species) != 1 & hif_hany(!!! syms(othersp), values = 1) ~ 0,
-                                                      .x == 1 & !! sym(species) != 1 & !hif_hany(!!! syms(othersp), values = 1) & !! sym(sp.d) == 1 ~ 1,
-                                                      .x == 1 & !! sym(species) != 1 & !! sym(sp.d) != 1 ~ 0)))
+                                                      .x > 0 & !! sym(species) == 1 ~ 1,
+                                                      .x > 0 & !! sym(species) != 1 & hif_hany(!!! syms(othersp), values = 1) ~ 0,
+                                                      .x > 0 & !! sym(species) != 1 & !hif_hany(!!! syms(othersp), values = 1) & !! sym(sp.d) == 1 ~ 1,
+                                                      .x > 0 & !! sym(species) != 1 & !! sym(sp.d) != 1 ~ 0)))
 
   transects_detection <- sf_m %>%
     dplyr::select(SiteID, Transect, Distance, Pellet, Footprint, Rubbing, Wallow) %>%

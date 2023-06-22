@@ -19,7 +19,7 @@ check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
 options(mc.cores=4)
 
 # Select deer species of interest
-deer_species <- c("Cervus unicolor")
+deer_species <- c("Canis lupus dingo")
 # Project of interest (2018 or 2023)
 project_short_name <- c("hog_deer_2023", "StatewideDeer")
 # Camera information
@@ -143,8 +143,8 @@ site_vars <- tbl(con, in_schema("deervic", "curated_site_data")) %>%
   collect() %>%
   mutate(HerbaceousUnderstoryCover = NNWHUCover + ENWHUCover,
          SiteID = case_when(SiteID == "47191" & CameraID == "HO04101053" ~ "47191A",
-                                   SiteID == "47191" & CameraID != "HO04101053" ~ "47191B",
-                                   TRUE ~ SiteID)) %>% # native + exotic herbaceous cover
+                            SiteID == "47191" & CameraID != "HO04101053" ~ "47191B",
+                            TRUE ~ SiteID)) %>% # native + exotic herbaceous cover
   arrange(SiteID) %>%
   as.data.frame()
 
@@ -266,6 +266,8 @@ n_survey <- transects_ne %>%
   summarise(n = sum(surveyed)) %>%
   pull(n)
 
+n_survey <- rep(0, length(n_survey))
+
 # get start and end indices to extract slices of y for each site
 start_idx <- rep(0, n_site)
 end_idx <- rep(0, n_site)
@@ -287,15 +289,15 @@ cam_max <- apply(n_obs, MARGIN = 1, FUN = function(x) {
     m <- 1
   }
   return(m)
-  })
+})
 
 any_seen <- rep(0, n_site)
-for (i in 1:n_site) {
-  if (n_survey[i] > 0) {
-    any_seen[i] <- max(transects_ne$Presence[start_idx[i]:end_idx[i]], na.rm = T)
-  }
-  any_seen[i] <- max(c(any_seen[i], cam_max[i]))
-}
+# for (i in 1:n_site) {
+#   if (n_survey[i] > 0) {
+#     any_seen[i] <- max(transects_ne$Presence[start_idx[i]:end_idx[i]], na.rm = T)
+#   }
+#   any_seen[i] <- max(c(any_seen[i], cam_max[i]))
+# }
 
 
 
@@ -329,38 +331,38 @@ beta.pars<- get.beta.param(avail$creation$rate, 2*avail$creation$SE)
 ### Prepare data for STAN model
 
 data = list(N=sum(dcount$size, na.rm = T),
-               delta = 2.5,
-               n_site = n_site,
-               n_gs = n_gs,
-               gs = gs,
-               n_distance_bins = n_distance_bins,
-               midpts = midpts,
-               max_distance = max_distance,
-               max_int_dist = as.integer(round(max_distance)),
-               theta_frac = theta_frac,
-               effort = Tkt,
-               n_obs = n_obs,
-               y = y,
-               pa = pa, # availability varies across sites based on number of individuals
-               det_model_matrix = det_model_matrix,
-               det_ncb = ncol(det_model_matrix),
-               bshape = beta.pars[[1]],
-               bscale = beta.pars[[2]],
-               n_max = 20,
-               # transect based data: Can provide it bu not used in hog deer
-               trans = nrow(transects),
-               y2 = transects$Presence,
-               start_idx = start_idx,
-               end_idx = end_idx,
-               trans_det_ncb = ncol(transect_mm),
-               trans_pred_matrix = transect_mm,
-               any_seen = any_seen,
-               n_survey = n_survey,
-               m_psi =  ncol(ab_model_matrix),
-               X_psi = ab_model_matrix,
-               npc = nrow(ab_model_pred_matrix),
-               X_pred_psi = ab_model_pred_matrix,
-               coords = coords)
+            delta = 2.5,
+            n_site = n_site,
+            n_gs = n_gs,
+            gs = gs,
+            n_distance_bins = n_distance_bins,
+            midpts = midpts,
+            max_distance = max_distance,
+            max_int_dist = as.integer(round(max_distance)),
+            theta_frac = theta_frac,
+            effort = Tkt,
+            n_obs = n_obs,
+            y = y,
+            pa = pa, # availability varies across sites based on number of individuals
+            det_model_matrix = det_model_matrix,
+            det_ncb = ncol(det_model_matrix),
+            bshape = beta.pars[[1]],
+            bscale = beta.pars[[2]],
+            n_max = 20,
+            # transect based data: Can provide it bu not used in hog deer
+            trans = nrow(transects),
+            y2 = transects$Presence,
+            start_idx = start_idx,
+            end_idx = end_idx,
+            trans_det_ncb = ncol(transect_mm),
+            trans_pred_matrix = transect_mm,
+            any_seen = any_seen,
+            n_survey = n_survey,
+            m_psi =  ncol(ab_model_matrix),
+            X_psi = ab_model_matrix,
+            npc = nrow(ab_model_pred_matrix),
+            X_pred_psi = ab_model_pred_matrix,
+            coords = coords)
 
 ni <- 400
 nw <- 400
@@ -408,17 +410,17 @@ inits = lapply(1:nc, function(i) list(beta_det=runif(2),
 # mapview::mapview(density_at_sites, zcol = "mean")
 
 #### Integrated model (not used for hog deer) ####
-modelRN <- cmdstan_model(here::here("stan", "count_det_non_det_rn.stan"))
-fitintegrn <- modelRN$sample(data = data, chains = nc,
+modelRE <- cmdstan_model(here::here("stan", "count_only_re.stan"))
+fitintegrn_dingo <- modelRN$sample(data = data, chains = nc,
                              parallel_chains = nc,
                              show_messages = TRUE,
                              save_warmup = FALSE,
                              iter_sampling = ni,
                              iter_warmup = nw)
 
-fitintegrn$save_object("outputs/fitintegrn.rds")
+fitintegrn_dingo$save_object("outputs/fitintegrn_dingo.rds")
 
-rn_dens <- fitintegrn$summary("N_site")
+rn_dens <- fitintegrn_dingo$summary("N_site")
 # Bind the density to the camera information
 density_at_sites_rn <- cbind(cams_curated, rn_dens) %>%
   mutate(means_sqrt = sqrt(mean)) %>%
@@ -434,11 +436,23 @@ rn_beta_psi <- fitintegrn$summary("beta_psi")
 beta_psi_draws <- fitintegrn$draws("beta_psi", format = "matrix") %>% `colnames<-`(c("Intercept", labels(terms(ab_formula))))
 mcmc_areas(beta_psi_draws)
 #### Spatial predictions ####
-rp <- fitintegrn$summary("pred")
+Nhat <- fitintegrn_dingo$summary("Nhat")
+rp <- fitintegrn_dingo$summary("pred", c("mean"))
 spatial_preds <- bind_cols(vic_model_data_resampled_df, rp)
 PredRast <- rast(vic_model_data_resampled, nlyr=1)
 
 PredRast[spatial_preds$cell] <- spatial_preds[,"mean"]
+
+#crop to eastern_vic
+east_vic <- vicmap_query("open-data-platform:ad_vicgov_region") %>%
+  filter(vicgov_region %in% c("HUME", "GIPPSLAND")) %>%
+  collect()  %>%
+  st_transform(3111) %>%
+  terra::vect()
+
+Pred_Eastern_Vic <- terra::mask(PredRast, east_vic)
+
+terra::writeRaster(Pred_Eastern_Vic, "outputs/Dingo_Density_EasternVic_km.tif")
 
 #### Detection Function ####
 det_curve <- fitintegrn$draws("DetCurve", format = "draws_matrix") %>%
