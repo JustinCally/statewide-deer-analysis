@@ -48,8 +48,10 @@ data {
 transformed data {
   // vector[n_distance_bins] pi; // availability for point
   vector[n_site] survey_area;
+  array[n_site] int n_obs_site;      //number of observations
     for(i in 1:n_site) {
       survey_area[i] = theta_frac * effort[i] * pi() * (max_distance/1000)^2;
+      n_obs_site[i] = sum(n_obs[i,]);
     }
 
 //  for (i in 1:n_distance_bins) {
@@ -141,10 +143,19 @@ model {
   //log_theta ~ normal(2,2);
 
   for(n in 1:n_site) {
-  for(j in 1:n_gs) {
-  n_obs[n,j] ~ poisson(lambda[n,j]);
-  y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
-  }
+    if (n_obs_site[n] == 0) {
+      for(j in 1:n_gs) {
+      target += log_sum_exp(bernoulli_lpmf(1 | (1-inv_logit(beta_trans_det[1]))),
+                            bernoulli_lpmf(0 | (1-inv_logit(beta_trans_det[1])))
+                              + poisson_lpmf(n_obs[n,j] | lambda[n,j]));
+      }
+    } else {
+      for(j in 1:n_gs) {
+      target += bernoulli_lpmf(0 | (1-inv_logit(beta_trans_det[1])))
+                  + poisson_lpmf(n_obs[n,j] | lambda[n,j]);
+      y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
+      }
+    }
 
 // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
 // https://discourse.mc-stan.org/t/royle-and-nichols/14150

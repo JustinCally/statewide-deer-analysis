@@ -247,8 +247,14 @@ for(j in 1:max(gs)) {
 # source("species_assign_wrangle.R")
 Rusaunicolor_Detection <- readRDS("data/Rusaunicolor_Detection.rds")
 
+presence_absence <-  tbl(con, in_schema("camtrap", "processed_site_substation_presence_absence")) %>%
+              filter(scientific_name %in% deer_species & ProjectShortName %in% !!project_short_name) %>%
+              dplyr::transmute(SiteID, Survey = "Camera", Presence) %>%
+  collect()
+
 transects <- Rusaunicolor_Detection %>%
-  arrange(SiteID) %>%
+  bind_rows(presence_absence) %>%
+  arrange(SiteID, Survey) %>%
   mutate(surveyed = 1,
          row = 1:n()) %>%
   as.data.frame()
@@ -279,8 +285,10 @@ for (i in 1:n_site) {
 
 transect_formula <- ~Survey
 
+# Make sure camera is the intercept
 transect_mm <- model.matrix(object = transect_formula, data = transects)
 
+# If include cameras in the transect this bit is duplicated
 cam_max <- apply(n_obs, MARGIN = 1, FUN = function(x) {
   m <- max(x)
   if(m > 0) {
@@ -346,7 +354,7 @@ data = list(N=sum(dcount$size, na.rm = T),
                det_ncb = ncol(det_model_matrix),
                bshape = beta.pars[[1]],
                bscale = beta.pars[[2]],
-               n_max = 20,
+               n_max = 10,
                # transect based data: Can provide it bu not used in hog deer
                trans = nrow(transects),
                y2 = transects$Presence,
@@ -428,13 +436,14 @@ mapview::mapview(density_at_sites_rn, zcol = "mean")
 # rn_lamb <- fitintegrn$summary("Site_lambda")
 # rn_r <- fitintegrn$summary("r")
 # rn_psi <- fitintegrn$summary("psi")
-
+fitintegrn$summary("Nhat")
+survey_det <- fitintegrn$summary("beta_trans_det")
 rn_eps_site <- fitintegrn$summary("eps_site")
 rn_beta_psi <- fitintegrn$summary("beta_psi")
 beta_psi_draws <- fitintegrn$draws("beta_psi", format = "matrix") %>% `colnames<-`(c("Intercept", labels(terms(ab_formula))))
 mcmc_areas(beta_psi_draws)
 #### Spatial predictions ####
-rp <- fitintegrn$summary("pred")
+rp <- fitintegrn$summary("pred", c("mean"))
 spatial_preds <- bind_cols(vic_model_data_resampled_df, rp)
 PredRast <- rast(vic_model_data_resampled, nlyr=1)
 
