@@ -450,6 +450,22 @@ east_vic <- vicmap_query("open-data-platform:ad_vicgov_region") %>%
   st_transform(3111) %>%
   terra::vect()
 
+library(VicmapR)
+library(tidyterra)
+vic <- vicmap_query("open-data-platform:ad_vicgov_region") %>%
+  collect()  %>%
+  st_transform(3111) %>%
+  st_simplify(dTolerance = 500)
+
+ggplot() +
+  geom_sf(data = vic) +
+  geom_spatraster(data = PredRast) +
+  scale_fill_whitebox_c(
+    palette = "muted",
+  ) +
+  labs(fill = "Dingoes per km2")
+
+
 Pred_Eastern_Vic <- terra::mask(PredRast, east_vic)
 
 terra::writeRaster(Pred_Eastern_Vic, "outputs/Dingo_Density_EasternVic_km.tif")
