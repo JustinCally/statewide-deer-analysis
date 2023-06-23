@@ -28,7 +28,7 @@ theta <- 40 * pi / 180 # camera angle in radians
 # Connect to database
 # Ensure GoConnect is active and keyring is stored with password
 con <- weda_connect(password = keyring::key_get(service = "ari-dev-weda-psql-01",
-                                                username = "psql_user"))
+                                                username = "psql_user"), username = "psql_user")
 
 # View what camera trap data is available (query the project)
 # use the curated data
@@ -70,8 +70,8 @@ camtrap_records_deer <- tbl(con, dbplyr::in_schema(schema = "camtrap", table = "
   mutate(Time = as.POSIXct(Time, format = "%H:%M:%OS"),
          Time_n = as.numeric(Time, units = "secs"),
          Behaviour = na_if(x = Behaviour, y = "NA")) %>%
-  filter(Time_n %% 2 == 0 & #snapshot moment interval of 2s
-           is.na(Behaviour)) %>% # filter out behaviors such as camera or marker interaction
+  filter(Time_n %% 2 == 0) %>% #& #snapshot moment interval of 2s
+           #is.na(Behaviour)) %>% # filter out behaviors such as camera or marker interaction
   group_by(SiteID, Time_n) %>%
   slice(1) %>% # if two photos occur in one second take only one (snapshot moment = 2)
   ungroup()
@@ -313,7 +313,7 @@ trigger.events <- camtrap_records_deer %>%
   # filter(is.na(Behaviour)) %>% ### Remove biased behaviour
   mutate(Sample.Label = as.character(SiteID))
 
-trigger.events$rtime <- gettime(trigger.events$Time, "%Y-%m-%d %H:%M:%OS")
+trigger.events$rtime <- gettime(x = trigger.events$Time, tryFormats = "%Y-%m-%d %H:%M:%OS")
 
 act_result <- fitact(trigger.events$rtime, sample="model", reps=50, bw = 30)
 
@@ -354,7 +354,7 @@ data = list(N=sum(dcount$size, na.rm = T),
                det_ncb = ncol(det_model_matrix),
                bshape = beta.pars[[1]],
                bscale = beta.pars[[2]],
-               n_max = 10,
+               n_max = 20,
                # transect based data: Can provide it bu not used in hog deer
                trans = nrow(transects),
                y2 = transects$Presence,
@@ -370,11 +370,11 @@ data = list(N=sum(dcount$size, na.rm = T),
                X_pred_psi = ab_model_pred_matrix,
                coords = coords)
 
-ni <- 400
-nw <- 400
+ni <- 200
+nw <- 300
 nt <- 1
-nb <- 400
-nc <- 4
+nb <- 300
+nc <- 8
 
 inits = lapply(1:nc, function(i) list(beta_det=runif(2),
                                       beta_trans_det = runif(1),
@@ -449,6 +449,7 @@ PredRast <- rast(vic_model_data_resampled, nlyr=1)
 
 PredRast[spatial_preds$cell] <- spatial_preds[,"mean"]
 
+plot(PredRast)
 #### Detection Function ####
 det_curve <- fitintegrn$draws("DetCurve", format = "draws_matrix") %>%
   as.data.frame() %>%

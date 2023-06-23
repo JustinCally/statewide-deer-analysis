@@ -142,17 +142,10 @@ model {
 
   for (n in 1 : n_site) {
     if (n_obs_site[n] == 0) {
-      for (j in 1 : n_gs) {
-        target += log_sum_exp(bernoulli_lpmf(1 | (1
-                                                  - inv_logit(beta_trans_det[1]))),
-                              bernoulli_lpmf(0 | (1
-                                                  - inv_logit(beta_trans_det[1])))
-                              + poisson_lpmf(n_obs[n, j] | lambda[n, j]));
-      }
+        target += log(1 - inv_logit(beta_trans_det[1]));
     } else {
       for (j in 1 : n_gs) {
-        target += bernoulli_lpmf(0 | (1 - inv_logit(beta_trans_det[1])))
-                  + poisson_lpmf(n_obs[n, j] | lambda[n, j]);
+        target += log1m((1 - inv_logit(beta_trans_det[1]))) + poisson_lpmf(n_obs[n, j] | lambda[n, j]) -log1m_exp(-lambda[n, j]);
         y[n,  : , j] ~ multinomial_logit(to_vector(log_p_raw[n,  : , j]));
       }
     }
