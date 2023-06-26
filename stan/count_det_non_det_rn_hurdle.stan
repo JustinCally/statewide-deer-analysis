@@ -154,29 +154,7 @@ model {
     // https://discourse.mc-stan.org/t/royle-and-nichols/14150
     // https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
     if (n_survey[n] > 0) {
-      vector[n_max - any_seen[n] + 1] lp;
-      // seen
-      if (any_seen[n] == 0) {
-        // not seen
-        lp[1] = poisson_log_lpmf(0 | log_lambda_psi[n]);
-      }
-      // not seen
-      // lp 1 simplification (not necessary)
-      else
-
-        lp[1] = poisson_log_lpmf(1 | log_lambda_psi[n])
-                + bernoulli_lpmf(y2[start_idx[n] : end_idx[n]] | r[start_idx[n] : end_idx[n]]);
-      // loop through possible values for maximum count (km2)
-      for (j in 2 : (n_max - any_seen[n] + 1)) {
-        lp[j] = poisson_log_lpmf(any_seen[n] + j - 1 | log_lambda_psi[n])
-                + bernoulli_lpmf(y2[start_idx[n] : end_idx[n]] | 1
-                                                                 - (1
-                                                                    - r[start_idx[n] : end_idx[n]])
-                                                                   ^ (
-                                                                   any_seen[n]
-                                                                   + j - 1));
-      }
-      target += log_sum_exp(lp);
+        target += bernoulli_lpmf(y2[start_idx[n] : end_idx[n]] | r[start_idx[n] : end_idx[n]]);
     }
   }
 }
