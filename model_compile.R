@@ -250,7 +250,7 @@ Rusaunicolor_Detection <- readRDS("data/Rusaunicolor_Detection.rds")
 
 presence_absence <-  tbl(con, in_schema("camtrap", "processed_site_substation_presence_absence")) %>%
               filter(scientific_name %in% deer_species & ProjectShortName %in% !!project_short_name) %>%
-              dplyr::transmute(SiteID, Survey = "Camera", Presence) %>%
+              dplyr::transmute(SiteID, Survey = "Camera", Presence, Count = 1) %>%
   collect()
 
 transects <- Rusaunicolor_Detection %>%
@@ -264,6 +264,12 @@ transects_ne <- site_vars %>%
   left_join(transects) %>%
   mutate(surveyed = coalesce(surveyed, 0),
          site = as.numeric(factor(SiteID)))
+
+y_pel <- transects_ne %>%
+  # filter(Survey == "Pellet") %>%
+  group_by(SiteID) %>%
+  summarise(Count = sum(Count, na.rm = T)) %>%
+  pull(Count)
 
 transects_ne_f <- transects_ne %>%
   filter(surveyed > 0)
@@ -370,7 +376,7 @@ data = list(N=sum(dcount$size, na.rm = T),
                npc = nrow(ab_model_pred_matrix),
                X_pred_psi = ab_model_pred_matrix,
                coords = coords,
-            y_pel = )
+            y_pel = y_pel)
 
 ni <- 400
 nw <- 400
