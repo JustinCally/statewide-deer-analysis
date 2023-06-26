@@ -93,6 +93,7 @@ transformed parameters {
   vector[trans] logit_trans_p = trans_pred_matrix * beta_trans_det; // observation process model
   vector[trans] r = inv_logit(logit_trans_p);
   vector[n_site] log_lambda_psi;
+  // vector[n_site] theta;
   // vector[n_site] logit_psi;
   // vector[n_site] log_psi;
   // vector[n_site] log1m_psi;// site random effects
@@ -114,6 +115,7 @@ transformed parameters {
     eps_site[n] = site_sd * site_raw[n]; // site random effect sd centreing
     // define log lambda
     log_lambda_psi[n] = X_psi[n,  : ] * beta_psi + eps_site[n];
+    // theta[n] = (1 - (inv_logit(beta_trans_det[1])));
     // convert to occupancy psi
     // logit_psi[n] = inv_cloglog(log_lambda_psi[n]);
     // log_psi[n] = log_inv_logit(logit_psi[n]);
@@ -123,9 +125,15 @@ transformed parameters {
       log_p[n, j] = log_sum_exp(log_p_raw[n,  : , j]);
       p[n, j] = exp(log_p[n, j]);
       // model site abundance
+      if(n_obs_site[n] == 0) {
+      lambda[n, j] = exp(log_lambda_psi[n] + log_p[n, j] + log_activ
+                         + log(eps_ngs[j]) + log(inv_logit(beta_trans_det[1])))
+                     .* survey_area[n];
+      } else {
       lambda[n, j] = exp(log_lambda_psi[n] + log_p[n, j] + log_activ
                          + log(eps_ngs[j]))
                      .* survey_area[n];
+      }
     }
   }
 }
@@ -141,14 +149,15 @@ model {
   //log_theta ~ normal(2,2);
 
   for (n in 1 : n_site) {
-    if (n_obs_site[n] == 0) {
-        target += log(1 - inv_logit(beta_trans_det[1]));
-    } else {
+    // if (n_obs_site[n] == 0) {
+    //    1 ~ bernoulli(theta[n]);
+    // } else {
+    //    0 ~ bernoulli(theta[n]);
       for (j in 1 : n_gs) {
-        target += log1m((1 - inv_logit(beta_trans_det[1]))) + poisson_lpmf(n_obs[n, j] | lambda[n, j]) -log1m_exp(-lambda[n, j]);
-        y[n,  : , j] ~ multinomial_logit(to_vector(log_p_raw[n,  : , j]));
+       n_obs[n,j] ~ poisson(lambda[n,j]);
+       y[n,  : , j] ~ multinomial_logit(to_vector(log_p_raw[n,  : , j]));
       }
-    }
+    // }
 
     // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
     // https://discourse.mc-stan.org/t/royle-and-nichols/14150

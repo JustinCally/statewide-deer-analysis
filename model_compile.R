@@ -70,8 +70,8 @@ camtrap_records_deer <- tbl(con, dbplyr::in_schema(schema = "camtrap", table = "
   mutate(Time = as.POSIXct(Time, format = "%H:%M:%OS"),
          Time_n = as.numeric(Time, units = "secs"),
          Behaviour = na_if(x = Behaviour, y = "NA")) %>%
-  filter(Time_n %% 2 == 0) %>% #& #snapshot moment interval of 2s
-           #is.na(Behaviour)) %>% # filter out behaviors such as camera or marker interaction
+  filter(Time_n %% 2 == 0 & #& #snapshot moment interval of 2s
+        is.na(Behaviour)) %>% # filter out behaviors such as camera or marker interaction
   group_by(SiteID, Time_n) %>%
   slice(1) %>% # if two photos occur in one second take only one (snapshot moment = 2)
   ungroup()
@@ -175,6 +175,7 @@ det_model_matrix <- model.matrix(det_formula, data = site_vars)
 
 # Intercept only abundance model: change to informative predictors
 ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(sqrt(DistancetoWater)) + scale(BIO12*BIO04) + scale(BIO01*BIO12) + scale(BIO04*sqrt(DistancetoWater)) + scale(TreeDensity) + scale(sqrt(SLOPE)*BIO04) + scale(sqrt(PastureDistance)) + scale(sqrt(CrownGrazingDistance)) + scale(TWIND) + scale(BIO15)
+ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(BIO12*BIO04) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15)
 ab_model_matrix <- model.matrix(ab_formula, data = combined_spatial_data)
 
 #### Prediction Data ####
@@ -370,11 +371,11 @@ data = list(N=sum(dcount$size, na.rm = T),
                X_pred_psi = ab_model_pred_matrix,
                coords = coords)
 
-ni <- 200
-nw <- 300
+ni <- 400
+nw <- 400
 nt <- 1
 nb <- 300
-nc <- 8
+nc <- 6
 
 inits = lapply(1:nc, function(i) list(beta_det=runif(2),
                                       beta_trans_det = runif(1),
@@ -414,10 +415,27 @@ inits = lapply(1:nc, function(i) list(beta_det=runif(2),
 #
 # # Currently looking at this map it seems like quite a few site coords are long (following up with Wildlife Unlimited)
 # mapview::mapview(density_at_sites, zcol = "mean")
+#### Integrated model (not used for hog deer) ####
+model_hurdle <- cmdstan_model(here::here("stan", "count_det_non_det_rn_hurdle.stan"))
+fit_hurdle <- model_hurdle$sample(data = data, chains = nc,
+                             parallel_chains = nc,
+                             show_messages = TRUE,
+                             save_warmup = FALSE,
+                             iter_sampling = ni,
+                             iter_warmup = nw)
+
 
 #### Integrated model (not used for hog deer) ####
 modelRN <- cmdstan_model(here::here("stan", "count_det_non_det_rn.stan"))
 fitintegrn <- modelRN$sample(data = data, chains = nc,
+                             parallel_chains = nc,
+                             show_messages = TRUE,
+                             save_warmup = FALSE,
+                             iter_sampling = ni,
+                             iter_warmup = nw)
+
+modelCO <- cmdstan_model(here::here("stan", "count_only_re.stan"))
+fitCO <- modelCO$sample(data = data, chains = nc,
                              parallel_chains = nc,
                              show_messages = TRUE,
                              save_warmup = FALSE,
@@ -430,7 +448,7 @@ rn_dens <- fitintegrn$summary("N_site")
 # Bind the density to the camera information
 density_at_sites_rn <- cbind(cams_curated, rn_dens) %>%
   mutate(means_sqrt = sqrt(mean)) %>%
-  st_as_sf(., coords = c("Longitude", "Latitude"), crs = 4286)
+  st_as_sf(., coords = c("Longitude", "Latitude"), crs = 4283)
 
 mapview::mapview(density_at_sites_rn, zcol = "mean")
 # rn_lamb <- fitintegrn$summary("Site_lambda")
@@ -450,6 +468,17 @@ PredRast <- rast(vic_model_data_resampled, nlyr=1)
 PredRast[spatial_preds$cell] <- spatial_preds[,"mean"]
 
 plot(PredRast)
+
+#### Spatial interpolation from points ####
+library(gstat)
+gs <- gstat(formula=mean~1, locations=~x+y, data=cbind(density_at_sites_rn %>%
+                                                         st_transform(3111) %>%
+                                                         st_coordinates(), rn_dens) %>%
+              rename(x = X, y = Y), nmax=5, set=list(idp = 0))
+nn <- interpolate(PredRast, gs, debug.level=0)
+nnmsk <- mask(nn, PredRast)
+sum(values(nnmsk[[1]], na.rm = T))
+plot(nnmsk[[1]])
 #### Detection Function ####
 det_curve <- fitintegrn$draws("DetCurve", format = "draws_matrix") %>%
   as.data.frame() %>%
