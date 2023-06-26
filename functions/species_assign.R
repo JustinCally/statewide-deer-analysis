@@ -44,16 +44,18 @@ detection_assign <- function(sp, species, othersp) {
 
   sf_m <- dplyr::mutate(sp, across(c(Pellet, Footprint, Rubbing, Wallow),
                                    ~ dplyr::case_when(.x == 0 ~ 0,
-                                                      .x > 0 & !! sym(species) == 1 ~ 1,
+                                                      .x > 0 & !! sym(species) == 1 ~ .x,
                                                       .x > 0 & !! sym(species) != 1 & hif_hany(!!! syms(othersp), values = 1) ~ 0,
-                                                      .x > 0 & !! sym(species) != 1 & !hif_hany(!!! syms(othersp), values = 1) & !! sym(sp.d) == 1 ~ 1,
+                                                      .x > 0 & !! sym(species) != 1 & !hif_hany(!!! syms(othersp), values = 1) & !! sym(sp.d) == 1 ~ .x,
                                                       .x > 0 & !! sym(species) != 1 & !! sym(sp.d) != 1 ~ 0)))
 
   transects_detection <- sf_m %>%
     dplyr::select(SiteID, Transect, Distance, Pellet, Footprint, Rubbing, Wallow) %>%
     pivot_longer(cols = c("Pellet", "Footprint", "Rubbing", "Wallow"),
-                 values_to = "Presence", names_to = "Survey") %>%
-    mutate(Presence = coalesce(Presence, 0))
+                 values_to = "Count", names_to = "Survey") %>%
+    mutate(Count = coalesce(Count, 0),
+           Presence = case_when(Count > 0 ~ 1,
+                                TRUE ~ 0))
 
   return(transects_detection)
 }

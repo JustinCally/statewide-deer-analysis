@@ -369,7 +369,8 @@ data = list(N=sum(dcount$size, na.rm = T),
                X_psi = ab_model_matrix,
                npc = nrow(ab_model_pred_matrix),
                X_pred_psi = ab_model_pred_matrix,
-               coords = coords)
+               coords = coords,
+            y_pel = )
 
 ni <- 400
 nw <- 400

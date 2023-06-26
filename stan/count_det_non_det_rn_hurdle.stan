@@ -21,6 +21,7 @@ data {
   int<lower=1> trans_det_ncb; // number of covariates for transect detection model
   matrix[trans, trans_det_ncb] trans_pred_matrix; // transect detection model matrix
   int<lower=1> n_max; // max for poisson RN
+  array[n_site] int y_pel; // effort
 
   // summary of whether species is known to be present at each site
   array[n_site] int<lower=0, upper=1> any_seen;
@@ -73,6 +74,7 @@ parameters {
   //real<lower=0> theta;
   // temporal availability parameters
   real<lower=0, upper=1> activ;
+  real beta_pel; // link from abundance counts to pellet counts
 }
 transformed parameters {
   // distance parameters
@@ -93,7 +95,7 @@ transformed parameters {
   vector[trans] logit_trans_p = trans_pred_matrix * beta_trans_det; // observation process model
   vector[trans] r = inv_logit(logit_trans_p);
   vector[n_site] log_lambda_psi;
-  // vector[n_site] theta;
+  vector[n_site] lambda_pel;
   // vector[n_site] logit_psi;
   // vector[n_site] log_psi;
   // vector[n_site] log1m_psi;// site random effects
@@ -115,6 +117,7 @@ transformed parameters {
     eps_site[n] = site_sd * site_raw[n]; // site random effect sd centreing
     // define log lambda
     log_lambda_psi[n] = X_psi[n,  : ] * beta_psi + eps_site[n];
+    lambda_pel[n] = exp(log_lambda_psi[n]) * beta_pel;
     // theta[n] = (1 - (inv_logit(beta_trans_det[1])));
     // convert to occupancy psi
     // logit_psi[n] = inv_cloglog(log_lambda_psi[n]);
@@ -163,6 +166,7 @@ model {
     // https://discourse.mc-stan.org/t/royle-and-nichols/14150
     // https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
     if (n_survey[n] > 0) {
+        y_pel[n] ~ poisson(lambda_pel[n]);
         target += bernoulli_lpmf(y2[start_idx[n] : end_idx[n]] | r[start_idx[n] : end_idx[n]]);
     }
   }

@@ -13,15 +13,6 @@ data {
   array[n_site, n_gs] int n_obs;      //number of observations
   array[n_site, n_distance_bins, n_gs] int y; // observations matrix
 
-  //transect level information
-  int<lower=1> trans;                  // total number of transects across all sites for all methods
-  int<lower = 0, upper = 1> y2[trans]; // transect based binomial detections
-  int<lower = 0, upper = trans> start_idx[n_site];
-  int<lower = 0, upper = trans> end_idx[n_site];
-  int<lower=1> trans_det_ncb;           // number of covariates for transect detection model
-  matrix[trans, trans_det_ncb] trans_pred_matrix; // transect detection model matrix
-  int<lower=1>  n_max; // max for poisson RN
-
   // summary of whether species is known to be present at each site
   int<lower = 0, upper = 1> any_seen[n_site];
 
@@ -68,8 +59,6 @@ parameters {
   vector[m_psi] beta_psi;
   // detection parameters
   vector[det_ncb] beta_det;
-  // transect detection parameters
-  vector[trans_det_ncb] beta_trans_det;
   //real<lower=0> theta;
   // temporal availability parameters
   real<lower=0, upper=1> activ;
@@ -90,10 +79,9 @@ transformed parameters {
   // activity parameters
   real log_activ = log(activ);
   // real log_theta = log(theta);
-  // transect level detections
+  vector[n_site] log_lambda_psi;
   vector[trans] logit_trans_p = trans_pred_matrix * beta_trans_det; // observation process model
   vector[trans] r = inv_logit(logit_trans_p);
-  vector[n_site] log_lambda_psi;
   // vector[n_site] logit_psi;
   // vector[n_site] log_psi;
   // vector[n_site] log1m_psi;// site random effects
@@ -124,7 +112,7 @@ for(n in 1:n_site) {
     log_p[n,j] = log_sum_exp(log_p_raw[n,,j]);
     p[n,j] = exp(log_p[n,j]);
     // model site abundance
-    lambda[n,j] = exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j]) + log(inv_logit(beta_trans_det[1]))) .* survey_area[n];
+    lambda[n,j] = exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n];
   }
   }
     }
@@ -134,40 +122,19 @@ model {
   eps_site ~ student_t(4, 0, 1);
   eps_ngs ~ uniform(0, 1); // prior for group size effect
   beta_psi ~ normal(0, 3); // prior for poisson/occupancy model
-  beta_trans_det ~ normal(0, 1); // beta for transect detection
   activ ~ beta(bshape, bscale);  //informative prior
   site_sd ~ normal(0, 1);
   site_raw ~ std_normal();
   //log_theta ~ normal(2,2);
 
   for(n in 1:n_site) {
+  y2[start_idx[n]:end_idx[n]] ~ bernoulli(r[start_idx[n] : end_idx[n]]);
   for(j in 1:n_gs) {
   n_obs[n,j] ~ poisson(lambda[n,j]);
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
 
-// Royle-Nichols implementation in STAN (looping over possible discrete values of N)
-// https://discourse.mc-stan.org/t/royle-and-nichols/14150
-// https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
-if (n_survey[n] > 0) {
-  vector[n_max - any_seen[n] + 1] lp;
-// seen
-    if(any_seen[n] == 0){ // not seen
-      lp[1] = poisson_log_lpmf(0 | log_lambda_psi[n]);
-    }
-// not seen
-// lp 1 simplification (not necessary)
-    else lp[1] = poisson_log_lpmf(1 | log_lambda_psi[n]) +
-    bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
-     // loop through possible values for maximum count (km2)
-    for (j in 2:(n_max - any_seen[n] + 1)){
-      lp[j] = poisson_log_lpmf(any_seen[n] + j - 1 | log_lambda_psi[n])
-      + bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
-    }
-    target += log_sum_exp(lp);
-  }
-  }
-
+}
 }
 
 generated quantities {
@@ -187,7 +154,7 @@ for(n in 1:n_site) {
   for(j in 1:n_gs) {
   log_lik[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
   n_obs_true[n, j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log(eps_ngs[j]))));
-  n_obs_pred[n,j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])  + log(inv_logit(beta_trans_det[1])))));
+  n_obs_pred[n,j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j]))));
     }
     Site_lambda[n] = exp(log_lambda_psi[n]);
     N_site[n] = sum(n_obs_true[n,]);
