@@ -376,7 +376,8 @@ data = list(N=sum(dcount$size, na.rm = T),
                npc = nrow(ab_model_pred_matrix),
                X_pred_psi = ab_model_pred_matrix,
                coords = coords,
-            y_pel = y_pel)
+            y_pel = y_pel,
+            reciprocal_phi_scale = 1)
 
 ni <- 400
 nw <- 400
@@ -423,6 +424,14 @@ inits = lapply(1:nc, function(i) list(beta_det=runif(2),
 # # Currently looking at this map it seems like quite a few site coords are long (following up with Wildlife Unlimited)
 # mapview::mapview(density_at_sites, zcol = "mean")
 #### Integrated model (not used for hog deer) ####
+model_negbin <- cmdstan_model(here::here("stan", "count_only_re_negbin.stan"))
+fit_negbin<- model_negbin$sample(data = data, chains = nc,
+                                  parallel_chains = nc,
+                                  show_messages = TRUE,
+                                  save_warmup = FALSE,
+                                  iter_sampling = ni,
+                                  iter_warmup = nw)
+
 model_hurdle <- cmdstan_model(here::here("stan", "count_det_non_det_rn_hurdle.stan"))
 fit_hurdle <- model_hurdle$sample(data = data, chains = nc,
                              parallel_chains = nc,
