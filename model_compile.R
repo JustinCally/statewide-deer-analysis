@@ -161,7 +161,7 @@ combined_spatial_data <- bind_cols(site_locs %>%
                                      dplyr::select(SiteID),
                                    terra::extract(x = processed_stack, terra::vect(site_locs %>%
                                                                                      sf::st_transform(3111)),
-                                                  method = "bilinear", na.rm = T) %>%
+                                                    method = "bilinear", na.rm = T) %>%
                                      dplyr::select(-ID)) %>%
   # left_join(combined_spatial_data %>% dplyr::select(SiteID, WatercourseDistance) %>% st_drop_geometry()) %>%
   mutate(DeerHunt = as.factor(DeerHunt),
@@ -174,15 +174,15 @@ det_formula <- ~ scale(HerbaceousUnderstoryCover)
 det_model_matrix <- model.matrix(det_formula, data = site_vars)
 
 # Intercept only abundance model: change to informative predictors
-ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(sqrt(DistancetoWater)) + scale(BIO12*BIO04) + scale(BIO01*BIO12) + scale(BIO04*sqrt(DistancetoWater)) + scale(TreeDensity) + scale(sqrt(SLOPE)*BIO04) + scale(sqrt(PastureDistance)) + scale(sqrt(CrownGrazingDistance)) + scale(TWIND) + scale(BIO15)
-ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(BIO12*BIO04) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15)
+# ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(sqrt(DistancetoWater)) + scale(BIO12*BIO04) + scale(BIO01*BIO12) + scale(BIO04*sqrt(DistancetoWater)) + scale(TreeDensity) + scale(sqrt(SLOPE)*BIO04) + scale(sqrt(PastureDistance)) + scale(sqrt(CrownGrazingDistance)) + scale(TWIND) + scale(BIO15)
+ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15) + scale(BIO06) + scale(NPP) + scale(SLOPE) + scale(MRVBF)
 ab_model_matrix <- model.matrix(ab_formula, data = combined_spatial_data)
 
 #### Prediction Data ####
 vic_model_data_resampled <- rast("/Volumes/DeerVic\ Photos/MaxentStack/vic_model_data_resampled.tif")
 vic_model_data_resampled_df <- as.data.frame(vic_model_data_resampled, xy = TRUE, na.rm = TRUE, cell = TRUE)
 ab_model_pred_matrix <- model.matrix(ab_formula, data = vic_model_data_resampled_df)
-
+prop_pred <- rep(1, nrow(ab_model_pred_matrix))
 
 n_site <- length(unique(dcount$SiteID))
 n_distance_bins <- 5
@@ -239,6 +239,37 @@ for(j in 1:max(gs)) {
 
 
 }
+
+# See https://github.com/mbjoseph/gpp-speed-test
+coords_raw <- st_as_sf(cams_curated, coords = c("Longitude", "Latitude"), crs = 4283) %>%
+  st_transform(3111) %>%
+  st_coordinates()
+
+mx <- 4 # number of knots in x
+my <- 4 # number of knots in y
+m <- mx * my
+NC <- nrow(coords_raw) #+ nrow(ss_site_model_data)
+
+place_knots <- function(mx, my, coords) {
+  xcoords <- seq(min(coords[, 1]), max(coords[, 1]), length.out = mx + 1)
+  ycoords <- seq(min(coords[, 2]), max(coords[, 2]), length.out = my + 1)
+  x_offset <- diff(xcoords)[1] / 2
+  y_offset <- diff(ycoords)[1] / 2
+  expand.grid(lon = xcoords[-c(mx + 1)] + x_offset,
+              lat = ycoords[-c(my + 1)] + y_offset)
+}
+
+survey_coords <- coords_raw %>%
+  # rbind(st_coordinates(ss_site_model_data)) %>%
+  as.data.frame() %>%
+  mutate(across(everything(), .fns = ~scales::rescale(.x, to = c(0,1)))) %>%
+  `names<-`(c("lon", "lat")) %>%
+  as.matrix()
+
+coords_star <- place_knots(mx, my, survey_coords)
+
+D_star <- as.matrix(dist(coords_star))
+D_site_star <- as.matrix(dist(rbind(survey_coords, coords_star)))[1:NC, (NC + 1):(NC + m)]
 
 #### Next section only useful if you are using transects/multiple observations ####
 # NOT USED FOR HOG DEER: only 1 site did transects #
@@ -375,12 +406,21 @@ data = list(N=sum(dcount$size, na.rm = T),
                X_psi = ab_model_matrix,
                npc = nrow(ab_model_pred_matrix),
                X_pred_psi = ab_model_pred_matrix,
+               prop_pred = prop_pred,
                coords = coords,
-            y_pel = y_pel,
-            reciprocal_phi_scale = 1)
+               y_pel = y_pel,
+               reciprocal_phi_scale = 1,
+               hs_df = 1,
+               hs_df_global = 2,
+               hs_scale_global = 1/sqrt(n_site), # ratio of expected non-zero to zero divided by total observation as per brms convention
+               hs_scale_slab = 0.5,
+               hs_df_slab = 4,
+               m = m,
+               D_star = D_star,
+               D_site_star = D_site_star)
 
-ni <- 400
-nw <- 400
+ni <- 750
+nw <- 750
 nt <- 1
 nb <- 300
 nc <- 6
@@ -389,6 +429,7 @@ inits = lapply(1:nc, function(i) list(beta_det=runif(2),
                                       beta_trans_det = runif(1),
                                       beta_psi_det = runif(1),
                                       beta_psi = runif(ncol(ab_model_matrix)),
+                                      beta_intercept = runif(1),
                                       activ = runif(1),
                                       alpha = 1, rho=2,
                                       site_sd = runif(1),
@@ -424,8 +465,16 @@ inits = lapply(1:nc, function(i) list(beta_det=runif(2),
 # # Currently looking at this map it seems like quite a few site coords are long (following up with Wildlife Unlimited)
 # mapview::mapview(density_at_sites, zcol = "mean")
 #### Integrated model (not used for hog deer) ####
-model_negbin <- cmdstan_model(here::here("stan", "count_only_re_negbin.stan"))
-fit_negbin<- model_negbin$sample(data = data, chains = nc,
+model_negbin_gp <- cmdstan_model(here::here("stan", "count_only_re_negbin_hs_gp.stan"))
+fitintegrn<- model_negbin_gp$sample(data = data, chains = nc,
+                                 parallel_chains = nc,
+                                 show_messages = TRUE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = ni,
+                                 iter_warmup = nw)
+
+model_negbin <- cmdstan_model(here::here("stan", "count_only_re_negbin_hs.stan"))
+fitintegrn<- model_negbin$sample(data = data, chains = nc,
                                   parallel_chains = nc,
                                   show_messages = TRUE,
                                   save_warmup = FALSE,
@@ -476,6 +525,7 @@ rn_eps_site <- fitintegrn$summary("eps_site")
 rn_beta_psi <- fitintegrn$summary("beta_psi")
 beta_psi_draws <- fitintegrn$draws("beta_psi", format = "matrix") %>% `colnames<-`(c("Intercept", labels(terms(ab_formula))))
 mcmc_areas(beta_psi_draws)
+
 #### Spatial predictions ####
 rp <- fitintegrn$summary("pred", c("mean"))
 spatial_preds <- bind_cols(vic_model_data_resampled_df, rp)
@@ -495,6 +545,7 @@ nn <- interpolate(PredRast, gs, debug.level=0)
 nnmsk <- mask(nn, PredRast)
 sum(values(nnmsk[[1]], na.rm = T))
 plot(nnmsk[[1]])
+
 #### Detection Function ####
 det_curve <- fitintegrn$draws("DetCurve", format = "draws_matrix") %>%
   as.data.frame() %>%
