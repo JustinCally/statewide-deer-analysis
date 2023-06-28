@@ -28,7 +28,7 @@ vars <- getProductMetaData(Detail = 'High', Product = "90m_Covariate", DataType 
 
 #View(vars)
 
-vars_to_download <- vars$Name
+# vars_to_download <- vars$Name
 
 # vars_to_download <- c("Clim_ADM",
 #                       "Clim_PTA",
@@ -42,6 +42,39 @@ vars_to_download <- vars$Name
 #                       "Veg_alpsbk_aust_y2009_sd5a2",
 #                       "Veg_FC_Mean_PV",
 #                       "Veg_NDVI_mean_Q2")
+
+vars_to_download <- c("Relief_elev_focalrange1000m_3s",
+                      "Relief_mrvbf_3s_mosaic",
+                      "Relief_roughness",
+                      "Relief_slope_perc",
+                      "Relief_twi_3s",
+                      "Veg_AVHRR_FPAR_Mean",
+                      "Veg_Modis_FractCover_Mean_BS",
+                      "Veg_Modis_FractCover_Mean_NPV",
+                      "Veg_Modis_FractCover_Mean_PV",
+                      "Veg_LandCoverTrend_evi_mean",
+                      "Clim_ADM",
+                      "Clim_ADRX",
+                      "Clim_EAAS",
+                      "Clim_fwofs",
+                      "Clim_PTA",
+                      "Clim_PTI",
+                      "Clim_PTRI",
+                      "Clim_PTX",
+                      "Clim_RSM",
+                      "Clim_RSRX",
+                      "Clim_TNI",
+                      "Clim_TNM",
+                      "Clim_TNX",
+                      "Clim_TRA",
+                      "Clim_WDA",
+                      "Clim_WDI",
+                      "Clim_WDRI",
+                      "Relief_mrrtf_3s",
+                      "Veg_NDVI_mean_Q1",
+                      "Veg_NDVI_mean_Q2",
+                      "Veg_NDVI_mean_Q3",
+                      "Veg_NDVI_mean_Q4")
 
 ##### Access the COG directly from the DataStore #######
 

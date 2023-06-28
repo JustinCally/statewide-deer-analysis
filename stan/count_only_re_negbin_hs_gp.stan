@@ -89,8 +89,8 @@ transformed data {
 
 parameters {
   // Site RE
-  real<lower=0> site_sd;
-  vector[n_site] site_raw;
+  // real<lower=0> site_sd;
+  // vector[n_site] site_raw;
  // abundance parameters
   simplex[n_gs] eps_ngs; // random variation in group size
   vector[1] beta_intercept;
@@ -116,7 +116,7 @@ parameters {
 
 transformed parameters {
   // distance parameters
-  vector[n_site] eps_site;
+  // vector[n_site] eps_site;
   array[n_site] real log_sigma;
   array[n_site] real sigma;
   array[n_site, n_distance_bins] real p_raw; // detection probability
@@ -192,9 +192,11 @@ for(n in 1:n_site) {
       }
   }
 
-  eps_site[n] = site_sd * site_raw[n]; // site random effect sd centreing
+  // eps_site[n] = site_sd * site_raw[n]; // site random effect sd centreing
 // define log lambda
-  log_lambda_psi[n] = X_psi[n,] * beta_psi + eps_site[n] + w[n];
+  log_lambda_psi[n] = X_psi[n,] * beta_psi
+  // + eps_site[n]
+  + w[n];
 // convert to occupancy psi
   // logit_psi[n] = inv_cloglog(log_lambda_psi[n]);
   // log_psi[n] = log_inv_logit(logit_psi[n]);
@@ -211,12 +213,12 @@ for(n in 1:n_site) {
 
 model {
   beta_det ~ normal(0, 4); // prior for sigma
-  eps_site ~ student_t(4, 0, 1);
+  // eps_site ~ student_t(4, 0, 1);
   eps_ngs ~ uniform(0, 1); // prior for group size effect
   beta_intercept ~ normal(0, 2); // prior for poisson model
   activ ~ beta(bshape, bscale);  //informative prior
-  site_sd ~ normal(0, 1);
-  site_raw ~ std_normal();
+  // site_sd ~ normal(0, 1);
+  // site_raw ~ std_normal();
   reciprocal_phi ~ cauchy(0., reciprocal_phi_scale);
   sigma_gp ~ normal(0, 1);
   eta ~ normal(0, 1);

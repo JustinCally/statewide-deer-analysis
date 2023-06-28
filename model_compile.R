@@ -157,16 +157,31 @@ processed_tifs <- list.files("/Volumes/DeerVic\ Photos/Processed_Rasters", full.
 
 processed_stack <- terra::rast(processed_tifs)
 
+slga_stack <- rast("/Volumes/Cally_Camtr/StatewideRasters/slga_stack.tif")
+
+
+# Add forest edges
+woody_forest_edges <- rast("data/woody_forest_edges.tif") %>%
+  `names<-`("ForestEdge") %>%
+  terra::`crs<-`("epsg:3111")
+
+woody_forest_edges_rp <- project(woody_forest_edges, processed_stack)
+
+processed_stack_add <- c(processed_stack, woody_forest_edges_rp)
+
 combined_spatial_data <- bind_cols(site_locs %>%
                                      dplyr::select(SiteID),
-                                   terra::extract(x = processed_stack, terra::vect(site_locs %>%
+                                   terra::extract(x = slga_stack, terra::vect(site_locs %>%
                                                                                      sf::st_transform(3111)),
                                                     method = "bilinear", na.rm = T) %>%
                                      dplyr::select(-ID)) %>%
   # left_join(combined_spatial_data %>% dplyr::select(SiteID, WatercourseDistance) %>% st_drop_geometry()) %>%
-  mutate(DeerHunt = as.factor(DeerHunt),
-         SambarHunt = as.factor(DeerHunt)) %>%
+  # mutate(DeerHunt = as.factor(DeerHunt),
+  #        SambarHunt = as.factor(DeerHunt)) %>%
   st_drop_geometry()
+
+# temp fix
+combined_spatial_data[is.na(combined_spatial_data)] <- 0
 
 
 # Basic detection model
@@ -175,12 +190,17 @@ det_model_matrix <- model.matrix(det_formula, data = site_vars)
 
 # Intercept only abundance model: change to informative predictors
 # ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(sqrt(DistancetoWater)) + scale(BIO12*BIO04) + scale(BIO01*BIO12) + scale(BIO04*sqrt(DistancetoWater)) + scale(TreeDensity) + scale(sqrt(SLOPE)*BIO04) + scale(sqrt(PastureDistance)) + scale(sqrt(CrownGrazingDistance)) + scale(TWIND) + scale(BIO15)
-ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15) + scale(BIO06) + scale(NPP) + scale(SLOPE) + scale(MRVBF)
+ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01)  + scale(BIO12) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15) + scale(BIO06) + scale(NPP) + scale(SLOPE) + scale(MRVBF) + scale(ForestEdge)
+ab_formula <- as.formula(paste0("~ scale(", paste(names(slga_stack), collapse=") + scale("), ")"))
 ab_model_matrix <- model.matrix(ab_formula, data = combined_spatial_data)
 
 #### Prediction Data ####
 vic_model_data_resampled <- rast("/Volumes/DeerVic\ Photos/MaxentStack/vic_model_data_resampled.tif")
-vic_model_data_resampled_df <- as.data.frame(vic_model_data_resampled, xy = TRUE, na.rm = TRUE, cell = TRUE)
+woody_forest_edges_rp2 <- project(woody_forest_edges, vic_model_data_resampled)
+slga_stack_reproj <- project(slga_stack, vic_model_data_resampled) %>% crop(vic_model_data_resampled, mask = T)
+vic_model_data_resampled_add <- c(vic_model_data_resampled, woody_forest_edges_rp2)
+
+vic_model_data_resampled_df <- as.data.frame(slga_stack_reproj, xy = TRUE, na.rm = TRUE, cell = TRUE)
 ab_model_pred_matrix <- model.matrix(ab_formula, data = vic_model_data_resampled_df)
 prop_pred <- rep(1, nrow(ab_model_pred_matrix))
 
@@ -245,9 +265,9 @@ coords_raw <- st_as_sf(cams_curated, coords = c("Longitude", "Latitude"), crs = 
   st_transform(3111) %>%
   st_coordinates()
 
-mx <- 4 # number of knots in x
-my <- 4 # number of knots in y
-m <- mx * my
+mx <- 8 # number of knots in x
+my <- 8 # number of knots in y
+
 NC <- nrow(coords_raw) #+ nrow(ss_site_model_data)
 
 place_knots <- function(mx, my, coords) {
@@ -259,14 +279,38 @@ place_knots <- function(mx, my, coords) {
               lat = ycoords[-c(my + 1)] + y_offset)
 }
 
+# Place nots within sampled area
+vic_bound <- vicmap_query("open-data-platform:delwp_region") %>%
+  # filter(state == "VIC") %>%
+  collect() %>%
+  st_make_valid() %>%
+  st_union() %>%
+  st_transform(3111)
+
+vic_bbox <- st_bbox(vic_bound)
+
+vic_knots <- st_sample(vic_bound, size = mx*my, type = "hexagonal", exact = FALSE)
+m <- length(vic_knots)
+
 survey_coords <- coords_raw %>%
   # rbind(st_coordinates(ss_site_model_data)) %>%
   as.data.frame() %>%
-  mutate(across(everything(), .fns = ~scales::rescale(.x, to = c(0,1)))) %>%
-  `names<-`(c("lon", "lat")) %>%
+  transmute(lon = scales::rescale(X, from = c(vic_bbox[1], vic_bbox[3]), to = c(0,1)),
+         lat = scales::rescale(Y, from = c(vic_bbox[2], vic_bbox[4]), to = c(0,1))) %>%
+  # mutate(across(everything(), .fns = ~scales::rescale(.x, to = c(0,1)))) %>%
+  # `names<-`(c("lon", "lat")) %>%
   as.matrix()
 
-coords_star <- place_knots(mx, my, survey_coords)
+coords_star <-  vic_knots %>%
+  st_coordinates() %>%
+  as.data.frame() %>%
+  transmute(lon = scales::rescale(X, from = c(vic_bbox[1], vic_bbox[3]), to = c(0,1)),
+            lat = scales::rescale(Y, from = c(vic_bbox[2], vic_bbox[4]), to = c(0,1))) %>%
+  # mutate(across(everything(), .fns = ~scales::rescale(.x, to = c(0,1)))) %>%
+  # `names<-`(c("lon", "lat")) %>%
+  as.matrix()
+
+# coords_star <- place_knots(mx, my, survey_coords)
 
 D_star <- as.matrix(dist(coords_star))
 D_site_star <- as.matrix(dist(rbind(survey_coords, coords_star)))[1:NC, (NC + 1):(NC + m)]
@@ -419,8 +463,8 @@ data = list(N=sum(dcount$size, na.rm = T),
                D_star = D_star,
                D_site_star = D_site_star)
 
-ni <- 750
-nw <- 750
+ni <- 300
+nw <- 400
 nt <- 1
 nb <- 300
 nc <- 6
