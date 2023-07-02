@@ -76,6 +76,8 @@ vars_to_download <- c("Relief_elev_focalrange1000m_3s",
                       "Veg_NDVI_mean_Q3",
                       "Veg_NDVI_mean_Q4")
 
+"PM_Lithology_Min_Geol_Age"
+
 ##### Access the COG directly from the DataStore #######
 
 
