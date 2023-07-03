@@ -13,6 +13,8 @@ library(cowplot)
 library(terra)
 # remotes::install_github("JustinCally/weda")
 library(weda)
+library(VicmapR)
+source("functions/gp_functions.r")
 source("functions/availability.R")
 
 # STAN settings
@@ -64,9 +66,18 @@ camtrap_records_deer <- tbl(con, dbplyr::in_schema(schema = "camtrap", table = "
   filter(scientific_name %in% deer_species & ProjectShortName %in% !!project_short_name) %>%
   dplyr::select(Species = scientific_name, SiteID, Distance = metadata_Distance, size = metadata_Multiples, Date, Time, Behaviour = metadata_Behaviour) %>%
   collect() %>%
+  mutate(Distance = case_when(Distance == "NA" | is.na(Distance) ~ "999",
+                              TRUE ~ Distance)) %>%
   mutate(Time = as.POSIXct(Time, format = "%H:%M:%OS"),
          Time_n = as.numeric(Time, units = "secs"),
          Behaviour = na_if(x = Behaviour, y = "NA")) %>%
+  rowwise() %>%
+  mutate(DistanceMod = list(stringr::str_split(Distance, pattern = "_&_")[[1]])) %>%
+  mutate(Distance = DistanceMod[which.min(as.numeric(stringr::str_extract(DistanceMod, pattern = "[0-9]+")))]) %>%
+  mutate(Distance = case_when(Distance == "0-2.5" ~ "0 - 2.5",
+                              Distance == "999" ~ NA_character_,
+                              TRUE ~ Distance)) %>%
+  ungroup() %>%
   filter(Time_n %% 2 == 0 & #& #snapshot moment interval of 2s
         is.na(Behaviour)) %>% # filter out behaviors such as camera or marker interaction
   group_by(SiteID, Time_n) %>%
@@ -155,19 +166,23 @@ det_formula <- ~ scale(HerbaceousUnderstoryCover)
 det_model_matrix <- model.matrix(det_formula, data = site_vars)
 
 # Intercept only abundance model: change to informative predictors
-ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15) + scale(SLOPE) + scale(MRVBF) + scale(ForestEdge)
-ab_model_matrix <- model.matrix(ab_formula, data = combined_spatial_data_fix %>% mutate(BIOREGION = factor(round(BIOREGION))))
+ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15) + scale(SLOPE) + scale(MRVBF) + scale(sqrt(ForestEdge))
+# ab_model_matrix <- model.matrix(ab_formula, data = combined_spatial_data_fix %>% mutate(BIOREGION = factor(round(BIOREGION))))
 
 #### Prediction Data ####
 vic_model_data_resampled <- rast("/Volumes/DeerVic\ Photos/MaxentStack/vic_model_data_resampled.tif")
 woody_forest_edges_rp2 <- project(woody_forest_edges, vic_model_data_resampled)
-vic_model_data_resampled_add <- c(vic_model_data_resampled, woody_forest_edges_rp2)
+vic_model_data_resampled_add <- c(vic_model_data_resampled, woody_forest_edges_rp2) %>%
+  aggregate(2, na.rm = TRUE)
 
-vic_model_data_resampled_df <- as.data.frame(vic_model_data_resampled_add, xy = TRUE, na.rm = TRUE, cell = TRUE) #%>%
-  # mutate(BIOREGION = round(BIOREGION)) %>%
-  # filter(!(BIOREGION %in% c(7, 28))) %>%
-  # mutate(BIOREGION = factor(BIOREGION))# missing data
-ab_model_pred_matrix <- model.matrix(ab_formula, data = vic_model_data_resampled_df)
+site_loc_cells <- cells(vic_model_data_resampled_add, vect(site_locs))[,"cell"]
+
+vic_model_data_resampled_df <- as.data.frame(vic_model_data_resampled_add, xy = TRUE, cell = TRUE) #%>%
+
+ab_model_pred_matrix_full <- model.matrix(ab_formula, data = bind_rows(combined_spatial_data_fix, vic_model_data_resampled_df))
+ab_model_pred_matrix <- ab_model_pred_matrix_full[(nrow(combined_spatial_data_fix)+1):nrow(ab_model_pred_matrix_full),]
+ab_model_matrix <- ab_model_pred_matrix_full[1:nrow(combined_spatial_data_fix),]
+
 prop_pred <- rep(1, nrow(ab_model_pred_matrix))
 
 # coordinates
@@ -335,8 +350,8 @@ beta.pars<- get.beta.param(avail$creation$rate, 2*avail$creation$SE)
 
 # Restrict n_max
 n_max <- cam_max
-n_max[n_max == 0] <- 50
-n_max[n_max == 1] <- 50
+n_max[n_max == 0] <- 3
+n_max[n_max == 1] <- 20
 
 data = list(N=sum(dcount$size, na.rm = T),
                delta = 2.5,
@@ -409,18 +424,16 @@ st_dist %>% min()
 st_dist %>% quantile(probs = seq(0, 1, 0.1))
 
 distance_scaled <- dist(coords) # was messing up
-# distance_scaled <- st_distance(as.data.frame(coords) %>% st_as_sf(., coords = c("X", "Y")))
-# distance_scaled <- distance_scaled[distance_scaled > 0]
-# distance_scaled %>% min()
+
 distance_scaled %>% quantile(probs = seq(0, 1, 0.1))
 
 # Upper limit will be ~ 60th quantile
 # Lower limit will be ~ 30th quantile
 
-prior_tune <- cmdstan_model(here::here("stan", "gp_prior_tune.stan"))
+# prior_tune <- cmdstan_model(here::here("stan", "gp_prior_tune.stan"))
 
-priorfit<- prior_tune$sample(iter_sampling=1, iter_warmup=0, chains=1,
-                               seed=5838298, fixed_param = TRUE)
+# priorfit<- prior_tune$sample(iter_sampling=1, iter_warmup=0, chains=1,
+#                                seed=5838298, fixed_param = TRUE)
 
 
 model_negbin <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_gp.stan"))
@@ -430,15 +443,111 @@ fitintegrn<- model_negbin$sample(data = data, chains = nc,
                                   save_warmup = FALSE,
                                   iter_sampling = ni,
                                   iter_warmup = nw)
+Sys.time()
 
+fitintegrn$save_object("outputs/fitintegrn.rds")
+
+Sys.time()
+
+#### Make predictions ####
+m_psi <- ncol(ab_model_pred_matrix)
+
+# coordinates
+coords_pred <- data.frame(X = vic_model_data_resampled_df$x, Y = vic_model_data_resampled_df$y)
+
+coords_pred_scaled <- coords_pred
+coords_pred_scaled$X <- scales::rescale(coords_pred$X, to = c(0,1))
+coords_pred_scaled$Y <- scales::rescale(coords_pred$Y, to = c(0,1))
+
+
+coords <- st_as_sf(cams_curated, coords = c("Longitude", "Latitude"), crs = 4283) %>%
+  st_transform(3111) %>%
+  st_coordinates() %>%
+  as.data.frame() %>%
+  mutate(X = scales::rescale(X, to = c(0,1), from = range(vic_model_data_resampled_df$x)),
+         Y = scales::rescale(Y, to = c(0,1), from = range(vic_model_data_resampled_df$y)))
+
+
+# fitintegrn <- readRDS("outputs/fitintegrn.rds")
+
+obs_gp_function_posterior <- fitintegrn$draws('gp_predict',format = "df")[,1:n_site]  # gp covariance estimates
+rho_posterior <- fitintegrn$draws('rho', format = "df")$rho        # length scale
+alpha_posterior <- fitintegrn$draws('alpha', format = "df")$alpha  # marginal variance
+beta_posterior<- fitintegrn$draws('beta_psi', format = "df")[,1:m_psi] |> as.matrix()  # fixed effects
+phi_posterior <- fitintegrn$draws('phi', format = "df")$phi
+
+nsims<- 12
+iters <- sample(nrow(beta_posterior), size = nsims)
+
+# Regions
+vic_regions <- vicmap_query("open-data-platform:delwp_region") %>%
+  collect()  %>%
+  st_transform(3111)
+
+ab_model_pred_matrix_full_NAs <- model.matrix(ab_formula,
+                                              data = model.frame(ab_formula, bind_rows(combined_spatial_data_fix, vic_model_data_resampled_df), na.action = na.pass))
+
+gp_preds_draws <- list()
+
+for(i in 1:nrow(vic_regions)) {
+
+  cat("Starting region", i, "at", as.character(Sys.time()))
+
+pred_grid <- vic_model_data_resampled_add %>% terra::mask(vect(vic_regions[i,]))
+
+# pred_grid # prediction grid including covariates
+OS<- rep(4, length(cells(pred_grid)))   # offset (cell size)
+Xpred <- ab_model_pred_matrix_full_NAs[(n_site + cells(pred_grid)),]
+
+obs_distances <- calc_point_distances(coords)
+pred_distances <- calc_point_distances(coords_pred_scaled[cells(pred_grid),]) #, upper=TRUE, diag=TRUE)
+obs_to_pred_distances <- calc_point_distances(coords, coords_pred_scaled[cells(pred_grid),])
+
+gp_preds <- bettermc::mclapply(X = as.list(iters),
+                   FUN = predict_gp, obs_distances = obs_distances,
+                   pred_distances = pred_distances,
+                   obs_to_pred_distances = obs_to_pred_distances,
+                   obs_gp_function = obs_gp_function_posterior,
+                   alpha = alpha_posterior,
+                   rho_posterior,
+                   beta = beta_posterior,
+                   Xpred = Xpred,
+                   OS = OS,
+                   dist = "negbin",
+                   phi = phi_posterior, mc.progress = TRUE, mc.cores = 4,
+                   kernel = "quad")
+
+gp_preds_draws[[i]] <- do.call(cbind, gp_preds)
+}
+
+names(gp_preds_draws) <- vic_regions$delwp_region
+
+saveRDS(gp_preds_draws, "outputs/gp_preds_draws.rds")
+
+Sys.time()
+
+
+# Make Raster of each region (mean)
+pred_grid_vals <- list()
+
+for(i in 1:nrow(vic_regions)) {
+
+gp_preds_mean <- apply(gp_preds_draws[[i]], 1, mean, na.rm = T)
+pred_grid <- vic_model_data_resampled_add %>% terra::mask(vect(vic_regions[i,]))
+pred_grid_vals[[i]] <- pred_grid[[1]]
+values(pred_grid_vals[[i]]) <- NA
+values(pred_grid_vals[[i]])[cells(pred_grid)] <- gp_preds_mean
+names(pred_grid_vals[[i]]) <- "Abundance"
+}
+
+statewide_pred_rast <- mosaic(sprc(pred_grid_vals))
+plot(statewide_pred_rast)
 # inspect the length scale
-fitintegrn$summary("rho")
+ar <- fitintegrn$summary(c("rho", "alpha"))
 gp_draws <- fitintegrn$draws(c("rho", "alpha"), format = "matrix")
 mcmc_areas(gp_draws)
 
 gp_predict <- fitintegrn$summary("gp_predict")
-
-fitintegrn$save_object("outputs/fitintegrn.rds")
 
 rn_dens <- fitintegrn$summary("N_site")
 # Bind the density to the camera information
