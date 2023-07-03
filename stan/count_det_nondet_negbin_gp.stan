@@ -31,10 +31,6 @@ data {
   // Abundance/occupancy model matrix
   int<lower = 1> m_psi;
   matrix[n_site, m_psi] X_psi;
-  // Prediction for abundance model
-  int<lower = 1> npc;
-  matrix[npc, m_psi] X_pred_psi;
-  vector[npc] prop_pred;
   // negbinom scale
   real reciprocal_phi_scale;
 
@@ -153,7 +149,7 @@ model {
   // GP priors
   eta ~ std_normal();
   rho ~ inv_gamma(72.2999, 20.2811);
-  alpha ~ normal(1, 2);
+  alpha ~ normal(0, 1);
 
   for(n in 1:n_site) {
   for(j in 1:n_gs) {
