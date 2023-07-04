@@ -129,13 +129,14 @@ processed_stack <- terra::rast(processed_tifs)
 
 # slga_stack <- rast("/Volumes/Cally_Camtr/StatewideRasters/slga_stack.tif")
 
-
 # Add forest edges
 woody_forest_edges <- rast("data/woody_forest_edges.tif") %>%
   `names<-`("ForestEdge") %>%
   terra::`crs<-`("epsg:3111")
 
 woody_forest_edges_rp <- project(woody_forest_edges, processed_stack)
+
+writeRaster(woody_forest_edges_rp, "/Volumes/Cally_Camtr/StatewideRasters/Processed_Rasters/woody_edges_1km.tif")
 
 processed_stack_add <- c(processed_stack, woody_forest_edges_rp)
 

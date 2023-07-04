@@ -130,6 +130,7 @@ Damadama_Detection <- detection_assign(transects_sp, "Dama dama", othersp = c("C
 Rusaunicolor_Detection <- detection_assign(transects_sp, "Cervus unicolor", othersp = c("Dama dama", "Cervus elaphus"))
 Cervuselaphus_Detection <- detection_assign(transects_sp, "Cervus elaphus", othersp = c("Dama dama", "Cervus unicolor"))
 
-saveRDS(Damadama_Detection, "data/Damadama_Detection.rds")
-saveRDS(Rusaunicolor_Detection, "data/Rusaunicolor_Detection.rds")
-saveRDS(Cervuselaphus_Detection, "data/Cervuselaphus_Detection.rds")
+# save with underscroe and VBA species name
+saveRDS(Damadama_Detection, "data/Dama_dama_Detection.rds")
+saveRDS(Rusaunicolor_Detection, "data/Cervus_unicolor_Detection.rds")
+saveRDS(Cervuselaphus_Detection, "data/Cervus_elaphus_Detection.rds")
