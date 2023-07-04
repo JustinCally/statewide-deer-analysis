@@ -431,10 +431,10 @@ distance_scaled %>% quantile(probs = seq(0, 1, 0.1))
 # Upper limit will be ~ 60th quantile
 # Lower limit will be ~ 30th quantile
 
-# prior_tune <- cmdstan_model(here::here("stan", "gp_prior_tune.stan"))
+prior_tune <- cmdstan_model(here::here("stan", "gp_prior_tune.stan"))
 
-# priorfit<- prior_tune$sample(iter_sampling=1, iter_warmup=0, chains=1,
-#                                seed=5838298, fixed_param = TRUE)
+priorfit<- prior_tune$sample(iter_sampling=1, iter_warmup=0, chains=1,
+                               seed=5838298, fixed_param = TRUE)
 
 
 model_negbin <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_gp.stan"))

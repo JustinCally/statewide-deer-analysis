@@ -13,12 +13,6 @@ data {
   array[n_site, n_gs] int n_obs;      //number of observations
   array[n_site, n_distance_bins, n_gs] int y; // observations matrix
 
-  // summary of whether species is known to be present at each site
-  int<lower = 0, upper = 1> any_seen[n_site];
-
-  // number of surveys at each site
-  int<lower = 0> n_survey[n_site];
-
   // availability prior information
   real<lower=0> bshape;               // availability shape
   real<lower=0> bscale;               // availability scale
@@ -33,16 +27,6 @@ data {
   matrix[n_site, m_psi] X_psi;
   // negbinom scale
   real reciprocal_phi_scale;
-
-  //transect level information
-  int<lower=1> trans;                  // total number of transects across all sites for all methods
-  int<lower = 0, upper = 1> y2[trans]; // transect based binomial detections
-  int<lower = 0, upper = trans> start_idx[n_site];
-  int<lower = 0, upper = trans> end_idx[n_site];
-  int<lower=1> trans_det_ncb;           // number of covariates for transect detection model
-  matrix[trans, trans_det_ncb] trans_pred_matrix; // transect detection model matrix
-  int<lower=1>  n_max[n_site]; // max for poisson RN
-
   // GP param
   array[n_site] vector[2] coords;
 }
@@ -68,8 +52,6 @@ parameters {
   // detection parameters
   vector[det_ncb] beta_det;
   //real<lower=0> theta;
-  // transect detection parameters
-  vector[trans_det_ncb] beta_trans_det;
   // temporal availability parameters
   real<lower=0, upper=1> activ;
   real reciprocal_phi;
@@ -92,16 +74,10 @@ transformed parameters {
   array[n_site, n_gs] real<lower=0> lambda;
   // activity parameters
   real log_activ = log(activ);
-  // real log_theta = log(theta);
-  vector[trans] logit_trans_p = trans_pred_matrix * beta_trans_det; // observation process model
-  vector[trans] r = inv_logit(logit_trans_p);
   vector[n_site] log_lambda_psi;
   // negbin dispersion
   real phi;
   phi = 1. / reciprocal_phi;
-  // vector[n_site] logit_psi;
-  // vector[n_site] log_psi;
-  // vector[n_site] log1m_psi;// site random effects
   // GP params
   matrix[n_site, n_site] cov = gp_exp_quad_cov(coords, alpha, rho) +
                                 diag_matrix(rep_vector(1e-9, n_site));
@@ -142,13 +118,12 @@ model {
   beta_det ~ normal(0, 4); // prior for sigma
   eps_ngs ~ uniform(0, 1); // prior for group size effect
   beta_psi ~ normal(0, 2); // prior for poisson model
-  beta_trans_det ~ normal(0, 1); // beta for transect detection
   activ ~ beta(bshape, bscale);  //informative prior
   reciprocal_phi ~ cauchy(0., reciprocal_phi_scale);
   //log_theta ~ normal(2,2);
   // GP priors
   eta ~ std_normal();
-  rho ~ inv_gamma(22.8018, 4.94958);
+  rho ~ inv_gamma(7.30124, 0.750216);
   alpha ~ normal(0, 1);
 
   for(n in 1:n_site) {
@@ -156,28 +131,6 @@ model {
   n_obs[n,j] ~ neg_binomial_2(lambda[n,j], phi);
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
-
-  // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
-// https://discourse.mc-stan.org/t/royle-and-nichols/14150
-// https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
-if (n_survey[n] > 0) {
-  vector[n_max[n] - any_seen[n] + 1] lp;
-// seen
-    if(any_seen[n] == 0){ // not seen
-      lp[1] = neg_binomial_2_lpmf(0 | exp(log_lambda_psi[n]), phi);
-    }
-// not seen
-// lp 1 simplification (not necessary)
-    else lp[1] = neg_binomial_2_lpmf(1 | exp(log_lambda_psi[n]), phi) +
-    bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
-     // loop through possible values for maximum count (km2)
-    for (j in 2:(n_max[n] - any_seen[n] + 1)){
-      lp[j] = neg_binomial_2_lpmf(any_seen[n] + j - 1 | exp(log_lambda_psi[n]), phi)
-      + bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
-    }
-    target += log_sum_exp(lp);
-  }
-
 }
 }
 
@@ -213,8 +166,4 @@ for(n in 1:n_site) {
     }
 }
 
-// for(i in 1:npc) {
-//   pred[i] = neg_binomial_2_rng(exp(X_pred_psi[i,] * beta_psi), phi) * prop_pred[i];
-// }
-// Nhat = sum(pred);
 }

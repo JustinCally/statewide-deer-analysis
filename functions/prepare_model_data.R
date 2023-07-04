@@ -10,7 +10,8 @@ prepare_model_data <- function(species,
                                raster_dir,
                                prediction_raster,
                                n_max_no_det,
-                               n_max_det) {
+                               n_max_det,
+                               transects = TRUE) {
 
   # Camera information
   theta <- 40 * pi / 180 # camera angle in radians
@@ -117,9 +118,9 @@ prepare_model_data <- function(species,
   #### Prediction Data ####
   vic_model_data_resampled <- terra::rast(prediction_raster)
 
-  site_loc_cells <- cells(vic_model_data_resampled, vect(site_locs))[,"cell"]
+  site_loc_cells <- terra::cells(vic_model_data_resampled, terra::vect(site_locs))[,"cell"]
 
-  vic_model_data_resampled_df <- as.data.frame(vic_model_data_resampled, xy = TRUE, cell = TRUE)
+  vic_model_data_resampled_df <- terra::as.data.frame(vic_model_data_resampled, xy = TRUE, cell = TRUE)
 
   ab_model_pred_matrix_full <- model.matrix(abundance_formula,
                                             data = bind_rows(combined_spatial_data_fix, vic_model_data_resampled_df))
@@ -192,6 +193,7 @@ prepare_model_data <- function(species,
                                                       n = j)})
   }
 
+  if(transects) {
   #### Transect-based detections ####
   #### Next section only useful if you are using transects/multiple observations ####
   # NOT USED FOR HOG DEER: only 1 site did transects #
@@ -259,6 +261,12 @@ prepare_model_data <- function(species,
     any_seen[i] <- max(c(any_seen[i], cam_max[i]))
   }
 
+  # Restrict n_max
+  n_max <- cam_max
+  n_max[n_max == 0] <- n_max_no_det
+  n_max[n_max == 1] <- n_max_det
+
+  }
 
   #### Availability ####
   #### Determine availability prior ####
@@ -280,11 +288,6 @@ prepare_model_data <- function(species,
   beta.pars<- get.beta.param(avail$creation$rate,
                              2*avail$creation$SE)
 
-  # Restrict n_max
-  n_max <- cam_max
-  n_max[n_max == 0] <- n_max_no_det
-  n_max[n_max == 1] <- n_max_det
-
   data = list(N=sum(dcount$size, na.rm = T),
               delta = 2.5,
               n_site = n_site,
@@ -303,16 +306,6 @@ prepare_model_data <- function(species,
               det_ncb = ncol(det_model_matrix),
               bshape = beta.pars[[1]],
               bscale = beta.pars[[2]],
-              n_max = n_max,
-              # transect based data: Can provide it bu not used in hog deer
-              trans = nrow(transects),
-              y2 = transects$Presence,
-              start_idx = start_idx,
-              end_idx = end_idx,
-              trans_det_ncb = ncol(transect_mm),
-              trans_pred_matrix = transect_mm,
-              any_seen = any_seen,
-              n_survey = n_survey,
               m_psi =  ncol(ab_model_matrix),
               X_psi = ab_model_matrix,
               npc = nrow(ab_model_pred_matrix),
@@ -320,6 +313,18 @@ prepare_model_data <- function(species,
               prop_pred = prop_pred,
               coords = coords,
               reciprocal_phi_scale = 1)
+  if(transects) {
+  data_trans <- list(trans = nrow(transects),
+                     y2 = transects$Presence,
+                     start_idx = start_idx,
+                     end_idx = end_idx,
+                     trans_det_ncb = ncol(transect_mm),
+                     trans_pred_matrix = transect_mm,
+                     any_seen = any_seen,
+                     n_survey = n_survey,
+                     n_max = n_max)
+  data <- c(data, data_trans)
+  }
 
   return(data)
 
