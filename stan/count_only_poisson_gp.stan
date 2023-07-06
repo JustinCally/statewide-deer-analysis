@@ -130,6 +130,8 @@ generated quantities {
   array[n_site] real N_site;
   array[n_site] real N_site_pred;
   array[n_site, max_int_dist+1] real DetCurve;
+  array[n_site, n_gs] real log_lik1;
+  array[n_site, n_gs] real log_lik2;
   array[n_site, n_gs] real log_lik;
   vector[n_site] Site_lambda;
   vector[n_site] psi;
@@ -139,7 +141,9 @@ generated quantities {
 
 for(n in 1:n_site) {
   for(j in 1:n_gs) {
-  log_lik[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
+  log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
+  log_lik2[n,j] =  poisson_lpmf(n_obs[n,j] | lambda[n,j]); //for loo
+  log_lik[n, j] = log_sum_exp(log_lik1[n,j], log_lik2[n,j]);
   n_obs_true[n, j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log(eps_ngs[j]))));
   n_obs_pred[n,j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n]));
     }

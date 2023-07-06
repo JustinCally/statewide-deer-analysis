@@ -74,6 +74,7 @@ parameters {
   real<lower=0> rho;    // GP length scale
   real<lower=0> alpha;  // GP marginal sd
   vector[n_site] eta;
+
 }
 
 transformed parameters {
@@ -91,6 +92,8 @@ transformed parameters {
   real log_activ = log(activ);
   // real log_theta = log(theta);
   vector[trans] logit_trans_p = trans_pred_matrix * beta_trans_det; // observation process model
+  // lp_site for RN model
+  vector[n_site] lp_site;
   vector[trans] r = inv_logit(logit_trans_p);
   vector[n_site] log_lambda_psi;
   // vector[n_site] logit_psi;
@@ -127,6 +130,28 @@ for(n in 1:n_site) {
     // model site abundance
     lambda[n,j] = exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n];
   }
+
+  // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
+// https://discourse.mc-stan.org/t/royle-and-nichols/14150
+// https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
+if (n_survey[n] > 0) {
+  vector[n_max[n] - any_seen[n] + 1] lp;
+// seen
+    if(any_seen[n] == 0){ // not seen
+      lp[1] = poisson_lpmf(0 | exp(log_lambda_psi[n]));
+    }
+// not seen
+// lp 1 simplification (not necessary)
+    else lp[1] = poisson_lpmf(1 | exp(log_lambda_psi[n])) +
+    bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
+     // loop through possible values for maximum count (km2)
+    for (j in 2:(n_max[n] - any_seen[n] + 1)){
+      lp[j] = poisson_lpmf(any_seen[n] + j - 1 | exp(log_lambda_psi[n]))
+      + bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
+    }
+    lp_site[n] = log_sum_exp(lp);
+  }
+
   }
     }
 
@@ -147,28 +172,7 @@ model {
   n_obs[n,j] ~ poisson(lambda[n,j]);
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
-
-  // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
-// https://discourse.mc-stan.org/t/royle-and-nichols/14150
-// https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
-if (n_survey[n] > 0) {
-  vector[n_max[n] - any_seen[n] + 1] lp;
-// seen
-    if(any_seen[n] == 0){ // not seen
-      lp[1] = poisson_lpmf(0 | exp(log_lambda_psi[n]));
-    }
-// not seen
-// lp 1 simplification (not necessary)
-    else lp[1] = poisson_lpmf(1 | exp(log_lambda_psi[n])) +
-    bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
-     // loop through possible values for maximum count (km2)
-    for (j in 2:(n_max[n] - any_seen[n] + 1)){
-      lp[j] = poisson_lpmf(any_seen[n] + j - 1 | exp(log_lambda_psi[n]))
-      + bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
-    }
-    target += log_sum_exp(lp);
-  }
-
+  target += lp_site[n];
 }
 }
 
@@ -178,7 +182,10 @@ generated quantities {
   array[n_site] real N_site;
   array[n_site] real N_site_pred;
   array[n_site, max_int_dist+1] real DetCurve;
-  array[n_site, n_gs] real log_lik;
+  array[n_site, n_gs] real log_lik1;
+  array[n_site, n_gs] real log_lik2;
+  array[n_site] real log_lik3;
+  array[n_site] real log_lik;
   vector[n_site] Site_lambda;
   vector[n_site] psi;
   // array[npc] real pred;
@@ -187,10 +194,16 @@ generated quantities {
 
 for(n in 1:n_site) {
   for(j in 1:n_gs) {
-  log_lik[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
+  log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
+  log_lik2[n,j] =  poisson_lpmf(n_obs[n,j] | lambda[n,j]); //for loo
   n_obs_true[n, j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log(eps_ngs[j]))));
   n_obs_pred[n,j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n]));
     }
+    // get loglik on a site level
+    log_lik3[n] = lp_site[n];
+    log_lik[n] += log_sum_exp(log_lik1[n,]);
+    log_lik[n] += log_sum_exp(log_lik2[n,]);
+    log_lik[n] +=  log_lik3[n];
     Site_lambda[n] = exp(log_lambda_psi[n]);
     N_site[n] = sum(n_obs_true[n,]);
     N_site_pred[n] = sum(n_obs_pred[n,]);
