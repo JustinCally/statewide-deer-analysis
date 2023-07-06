@@ -79,10 +79,8 @@ transformed parameters {
   real phi;
   phi = 1. / reciprocal_phi;
   // GP params
-  matrix[n_site, n_site] cov = gp_exp_quad_cov(coords, alpha, rho) +
-                                diag_matrix(rep_vector(1e-9, n_site));
-  matrix[n_site, n_site] L_cov = cholesky_decompose(cov);
-  vector[n_site] gp_predict = L_cov * eta;
+  vector[n_site] gp_predict = cholesky_decompose(gp_exp_quad_cov(coords, alpha, rho) +
+                                diag_matrix(rep_vector(1e-9, n_site))) * eta;
 
 for(n in 1:n_site) {
   log_sigma[n] = det_model_matrix[n,] * beta_det;
@@ -151,7 +149,7 @@ for(n in 1:n_site) {
   for(j in 1:n_gs) {
   log_lik[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
   n_obs_true[n, j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log(eps_ngs[j])), phi));
-  n_obs_pred[n,j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])), phi));
+  n_obs_pred[n,j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n], phi));
     }
     Site_lambda[n] = exp(log_lambda_psi[n]);
     N_site[n] = sum(n_obs_true[n,]);

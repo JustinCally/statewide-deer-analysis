@@ -9,7 +9,7 @@ functions {
 
 transformed data {
   vector[2] y_guess = [log(10), log(20)]';
-  vector[2] theta = [0.216823187, 0.375577076]';
+  vector[2] theta = [0.05, 0.3]';
   vector[2] y;
   real x_r[0];
   int x_i[0];

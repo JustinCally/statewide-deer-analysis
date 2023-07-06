@@ -3,7 +3,10 @@
 .RData
 .Ruserdata
 outputs
-stan/count_det_non_det_rn
-stan/count_only
-stan/count_det_non_det_rn_gp
-stan/count_only_re
+stan/count_det_nondet_negbin_gp
+stan/count_det_nondet_negbin_hs_gp
+stan/count_det_nondet_poisson_gp
+stan/count_only_negbin_gp
+stan/count_only_poisson_gp
+stan/gp_prior_tune
+outputs/

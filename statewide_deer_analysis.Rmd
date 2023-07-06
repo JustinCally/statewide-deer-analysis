@@ -1,0 +1,249 @@
+---
+title: "Abundance of Deer in Victoria"
+description: |
+  Determining abundance of deer species in Victoria using camera trap data
+author:
+  - name: Justin G Cally
+    url: https://justincally.github.io/blog/
+    affiliation: Arthur Rylah Institute
+    affiliation_url: https://www.ari.vic.gov.au/
+date: 2023-07-06
+output:
+  html_document:
+    self_contained: true
+    toc: true # table of content true
+    toc_float: true # make 
+    depth: 3  # upto three depths of headings (specified by #, ## and ###)
+    number_sections: false  ## if you want number sections at each table header
+    code_folding: true # awesome buttons to show/hide the code
+    theme: yeti
+slug: statewidedeer
+---
+
+# Setup  
+
+```{r setup, include=TRUE}
+library(cmdstanr)
+library(dplyr)
+library(sf)
+library(bayesplot)
+library(loo)
+library(gt)
+check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
+options(mc.cores=6)
+
+#### Database connection ####
+con <- weda::weda_connect(password = keyring::key_get(service = "ari-dev-weda-psql-01",
+                                                username = "psql_user"), username = "psql_user")
+```
+
+
+# Custom Functions  
+
+Additional functions used in the data preparation, modelling and alaysis are available in the `/functions` directory.  
+
+```{r sourcefunctions, echo = FALSE, results = 'hide'}
+# Source internal functions
+sapply(list.files("functions", full.names = T), source, verbose = F)
+```
+
+# Prepare Data  
+
+## Scope of models 
+
+```{r data_params}
+# Species to run model for.
+deer_species_all <- c("Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
+# Projects to select.
+project_short_name <- c("hog_deer_2023", "StatewideDeer")
+# Buffer for data extraction.
+spatial_buffer <- 1000
+# Covariate Rasters
+raster_files <- "/Volumes/DeerVic\ Photos/Processed_Rasters"
+prediction_raster <- "data/prediction_raster/vic_model_data_resampled.tif"
+n_max_no_det <- 10
+n_max_det <- 50
+```
+
+## Formulas for detection and abundance. 
+
+```{r formulas}
+#### Model formulas ####
+transect_formula <- ~Survey
+ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15) + scale(SLOPE) + scale(MRVBF) + scale(sqrt(ForestEdge))
+# Use an intercept only detection model to start with
+det_formula <- ~ 1 #scale(HerbaceousUnderstoryCover)
+```
+
+## Camera locations 
+
+```{r CamLocs}
+cams_curated <- tbl(con, dbplyr::in_schema("camtrap", "curated_camtrap_operation")) %>%
+  dplyr::filter(ProjectShortName %in% !!project_short_name) %>% # Only retrieve cam records for hog deer 2023
+  dplyr::collect() %>%
+  dplyr::arrange(SiteID)
+```
+
+
+## Create model data 
+
+Using the `prepare_model_data()` function we generate the data for the `STAN` model. 
+
+```{r ModelData}
+model_data_file <- "data/model_data.rds"
+if(!file.exists(model_data_file)) {
+evaluate_transects <- c(TRUE, TRUE, TRUE, FALSE)
+model_data <- list()
+for(i in 1:length(deer_species_all)) {
+model_data[[i]] <- prepare_model_data(species = deer_species_all[i],
+                                 projects = project_short_name,
+                     buffer = spatial_buffer,
+                     detection_formula = det_formula,
+                     abundance_formula = ab_formula,
+                     transect_formula = transect_formula,
+                     con = con,
+                     raster_dir = raster_files,
+                     prediction_raster = prediction_raster,
+                     n_max_no_det = n_max_no_det,
+                     n_max_det = n_max_det,
+                     evaltransects = evaluate_transects[i],
+                     snapshot_interval = 2)
+
+}
+names(model_data) <- deer_species_all
+saveRDS(model_data, model_data_file)
+} else {
+  model_data <- readRDS(model_data_file)
+}
+```
+
+## Model settings  
+
+```{r ModelSettings}
+#### Run models for all species ####
+# STAN settings
+ni <- 250
+nw <- 250
+nt <- 1
+nb <- 300
+nc <- 6
+
+# Inits for model. 
+inits = lapply(1:nc, function(i) list(beta_det=runif(2),
+                                      beta_trans_det = runif(1),
+                                      beta_psi_det = runif(1),
+                                      beta_psi = runif((1+length(labels(terms(ab_formula))))),
+                                      activ = runif(1),
+                                      alpha = 2, rho=1,
+                                      phi = runif(1),
+                                      site_sd = runif(1),
+                                      eps_ngs = 1/3,
+                                      site_raw = rnorm(317),
+                                      eta = rnorm(317)))
+```
+
+# Models  
+
+## Read in Models  
+
+```{r models, echo = FALSE}
+model_negbin_co <- cmdstan_model(here::here("stan", "count_only_negbin_gp.stan"))
+model_negbin <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_gp.stan"))
+model_poisson <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_gp.stan"))
+model_poisson_co <- cmdstan_model(here::here("stan", "count_only_poisson_gp.stan"))
+```
+
+## Fit models  
+
+```{r FitModels, eval = FALSE}
+distributions <- c("poisson", "negbin")
+model_fits <- list()
+
+for(j in 1:length(distributions)) {
+
+  for(i in 1:length(deer_species_all)) {
+
+  if(evaluate_transects[i]) {
+    model_to_fit <- get(paste0("model_", distributions[j]))
+  } else {
+    model_to_fit <- get(paste0("model_", distributions[j], "_co"))
+  }
+
+  model_fits[[i]] <- model_to_fit$sample(data = model_data[[i]],
+                                         chains = nc,
+                                 parallel_chains = nc,
+                                 show_messages = TRUE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = ni,
+                                 iter_warmup = nw)
+
+  model_fits[[i]]$save_object(paste0("outputs/models/fit_", 
+                                     distributions[j], 
+                                     "_", 
+                                     deer_species_all[i],".rds"))
+
+  }
+  
+}
+```
+
+```{r ReadInModels}
+model_fits <- list()
+
+model_dir <- "outputs/models"
+models_to_read <- list.files(model_dir, full.names = FALSE)
+
+for(i in 1:length(models_to_read)) {
+  model_fits[[i]] <- readRDS(paste0(model_dir, "/", models_to_read[i]))
+}
+
+names(model_fits) <- stringr::str_replace_all(models_to_read, pattern = ".rds", replacement = "")
+```
+
+## Model Evaluation  
+
+### LOO (Leave-One-Out Cross-Validation). 
+
+```{r}
+loo_compares <- list()
+loo_compare_tables <- list()
+for(i in 1:length(deer_species_all)) {
+  which_models <- model_fits[stringr::str_detect(models_to_read, pattern = deer_species_all[i])]
+  
+  loo_compares[[i]] <- list()
+  
+  for(j in 1:length(which_models)) {
+     loo_compares[[i]][[j]] <- which_models[[j]]$loo()
+  }
+  
+  names(loo_compares[[i]]) <- names(which_models)
+  loo_compare_tables[[i]] <- loo::loo_compare(loo_compares[[i]]) %>% as.data.frame()
+  loo_compare_tables[[i]]$Species <- deer_species_all[i]
+}
+
+names(loo_compare_tables) <- deer_species_all
+
+loo_table_all <- bind_rows(loo_compare_tables) %>%
+        tibble::rownames_to_column(var = "model_full") %>%
+  mutate(model = stringr::str_extract(model_full, "poisson|negbin")) %>%
+        dplyr::select(Species, model, everything(), -model_full) %>%
+        arrange(Species) %>% 
+        as.data.frame()
+
+# Plot loo table
+  gt(loo_table_all, 
+     groupname_col = "Species") %>% 
+    fmt_number(decimals = 2) %>%
+    tab_style(locations = cells_row_groups(), style = cell_text(weight = "bold"))
+    
+```
+
+### Posterior predictive checks  
+
+```{r ppc, fig.width = 6, fig.height = 8}
+posterior_checks(model = model_fits[["fit_poisson_Cervus unicolor"]], 
+                 model_data = model_data$`Cervus unicolor`, 
+                 stat = prop_zero, 
+                 title = "Proportion Zeros", binwidth = 0.005, xlims = c(0.4, 1))
+```
+

@@ -11,7 +11,8 @@ prepare_model_data <- function(species,
                                prediction_raster,
                                n_max_no_det,
                                n_max_det,
-                               transects = TRUE) {
+                               evaltransects = TRUE,
+                               snapshot_interval = 2) {
 
   # Camera information
   theta <- 40 * pi / 180 # camera angle in radians
@@ -29,8 +30,8 @@ prepare_model_data <- function(species,
                                            as.POSIXct(Problem1_from, format = "%Y-%m-%d %H:%M:%OS"),
                                          units = "secs"), 0),
            Tk_adj = Tk-Tk_prob,
-           Tkt = Tk_adj / 2, # snapshot moments: every second second
-           Effort = (Tk_adj*theta)/(2 * pi * 2)) %>%
+           Tkt = Tk_adj / snapshot_interval, # snapshot moments: every second second
+           Effort = (Tk_adj*theta)/(snapshot_interval * pi * 2)) %>%
     dplyr::arrange(SiteID)
 
 
@@ -51,7 +52,7 @@ prepare_model_data <- function(species,
                                 Distance == "999" ~ NA_character_,
                                 TRUE ~ Distance)) %>%
     dplyr::ungroup() %>%
-    dplyr::filter(Time_n %% 2 == 0 & #& #snapshot moment interval of 2s
+    dplyr::filter(Time_n %% snapshot_interval == 0 & #& #snapshot moment interval of 2s
              is.na(Behaviour)) %>% # filter out behaviors such as camera or marker interaction
     dplyr::group_by(SiteID, Time_n) %>%
     dplyr::slice(1) %>% # if two photos occur in one second take only one (snapshot moment = 2)
@@ -193,7 +194,7 @@ prepare_model_data <- function(species,
                                                       n = j)})
   }
 
-  if(transects) {
+  if(evaltransects) {
   #### Transect-based detections ####
   #### Next section only useful if you are using transects/multiple observations ####
   # NOT USED FOR HOG DEER: only 1 site did transects #
@@ -201,7 +202,7 @@ prepare_model_data <- function(species,
   # Load in transects that have been assifgned to species
   # source("functions/species_assign.R")
   # source("species_assign_wrangle.R")
-  filepath_det <- paste0("data/",stringr::str_replace_all(species, " ", "_"), "_Detection.rds")
+  filepath_det <- paste0("data/transects/",stringr::str_replace_all(species, " ", "_"), "_Detection.rds")
   Deer_Detection <- readRDS(filepath_det)
 
   presence_absence <-  dplyr::tbl(con,
@@ -312,8 +313,9 @@ prepare_model_data <- function(species,
               X_pred_psi = ab_model_pred_matrix,
               prop_pred = prop_pred,
               coords = coords,
+              coords_pred = coords_pred_scaled,
               reciprocal_phi_scale = 1)
-  if(transects) {
+  if(evaltransects) {
   data_trans <- list(trans = nrow(transects),
                      y2 = transects$Presence,
                      start_idx = start_idx,
