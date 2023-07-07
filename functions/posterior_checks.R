@@ -14,34 +14,34 @@ prop_zero<- function(x) mean(x == 0, na.rm = T)
 #'
 #' @return plot grid
 #' @export
-posterior_checks <- function(model, model_data, stat, title, xlims = c(0,1), integrated = F, ...) {
-
+posterior_checks <- function(model, model_data, stat, title, integrated = F, only_det = F, ...) {
   # get n_obs from data
   n_obs <- model_data[["n_obs"]]
-  n_obs_totals <- rowSums(n_obs)
+  n_obs_totals <- n_obs %*% model_data[["gs"]] %>% as.vector()
 
-  if(integrated) {
-    n_obs[,1] <- pmax(n_obs[,1], model_data[["any_seen"]])
+  if(only_det) {
+    which_inc <- which(n_obs_totals > 0)
+  } else {
+    which_inc <- seq(1:length(n_obs_totals))
   }
 
-  model_draws <- model$draws("n_obs_pred", format = "matrix")
+  if(integrated) {
+    n_obs_totals <- pmax(n_obs_totals, model_data[["any_seen"]])
+  }
 
-  split_groups <- list()
-  ppc_zeros <- list()
-  ppc_plots <- list()
-  for(i in 1:ncol(n_obs)) {
-    col_sel <- paste0("n_obs_pred[", 1:nrow(n_obs), ",", i, "]")
-    split_groups[[i]] <- model_draws[,col_sel]
+  model_draws <- model$draws("N_site_pred", format = "matrix")
 
-    ppc_plots[[i]] <- bayesplot::ppc_stat(n_obs[,i],
-                                          split_groups[[i]],
-                                          stat=stat,
-                                          ...) +
-      ggplot2::ggtitle(label = title, subtitle = paste0("Group size = ", i)) +
-      ggplot2::xlim(xlims) +
+  q25 <- min(quantile(apply(model_draws, 1, stat, simplify = T), 0.01), do.call(stat, args = list(x = n_obs_totals[which_inc])))
+  q975 <- max(quantile(apply(model_draws, 1, stat, simplify = T), 0.99), do.call(stat, args = list(x = n_obs_totals[which_inc])))
+
+    ppc_plots <- bayesplot::ppc_stat(n_obs_totals[which_inc],
+                                     model_draws[,which_inc],
+                                     stat=stat,
+                                     ...) +
+      ggplot2::ggtitle(label = title) +
+      ggplot2::xlim(q25, q975) +
       ggplot2::theme_bw() +
       ggplot2::theme(legend.position = "top")
 
-  }
-  cowplot::plot_grid(plotlist = ppc_plots, ncol = 2)
+    ppc_plots
 }

@@ -129,15 +129,12 @@ nb <- 300
 nc <- 6
 
 # Inits for model. 
-inits = lapply(1:nc, function(i) list(beta_det=runif(2),
-                                      beta_trans_det = runif(1),
-                                      beta_psi_det = runif(1),
-                                      beta_psi = runif((1+length(labels(terms(ab_formula))))),
-                                      activ = runif(1),
-                                      alpha = 2, rho=1,
+inits = lapply(1:nc, function(i) list(beta_det = as.array(runif(1)), 
+                                      activ = 0.35,
+                                      alpha = 3, rho=0.08,
                                       phi = runif(1),
                                       site_sd = runif(1),
-                                      eps_ngs = 1/3,
+                                      reciprocal_phi = runif(1),
                                       site_raw = rnorm(317),
                                       eta = rnorm(317)))
 ```
@@ -156,7 +153,7 @@ model_poisson_co <- cmdstan_model(here::here("stan", "count_only_poisson_gp.stan
 ## Fit models  
 
 ```{r FitModels, eval = FALSE}
-distributions <- c("poisson", "negbin")
+distributions <- c("negbin", "poisson")
 model_fits <- list()
 
 for(j in 1:length(distributions)) {
@@ -171,10 +168,13 @@ for(j in 1:length(distributions)) {
 
   model_fits[[i]] <- model_to_fit$sample(data = model_data[[i]],
                                          chains = nc,
-                                 parallel_chains = nc,
+                                 parallel_chains = nc, 
+                                 init = inits,
+                                 max_treedepth = 14,
+                                 adapt_delta = 0.9,
                                  show_messages = TRUE,
                                  save_warmup = FALSE,
-                                 iter_sampling = ni,
+                                 iter_sampling = ni, 
                                  iter_warmup = nw)
 
   model_fits[[i]]$save_object(paste0("outputs/models/fit_", 
@@ -221,7 +221,7 @@ for(i in 1:length(deer_species_all)) {
   loo_compare_tables[[i]]$Species <- deer_species_all[i]
 }
 
-names(loo_compare_tables) <- deer_species_all
+names(loo_compare_tables) <- deer_species_all[1:2]
 
 loo_table_all <- bind_rows(loo_compare_tables) %>%
         tibble::rownames_to_column(var = "model_full") %>%
@@ -240,10 +240,78 @@ loo_table_all <- bind_rows(loo_compare_tables) %>%
 
 ### Posterior predictive checks  
 
-```{r ppc, fig.width = 6, fig.height = 8}
-posterior_checks(model = model_fits[["fit_poisson_Cervus unicolor"]], 
+#### Sambar Deer Model. 
+
+```{r ppcSambar, fig.width = 6, fig.height = 6, message = F}
+funs <- c(prop_zero, mean, max, sd)
+titles <- c("Proportion zeros", "Mean", "Max", "SD")
+
+ppc_sambar <- list()
+
+for(i in 1:length(funs)) {
+ppc_sambar[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Cervus unicolor"]], 
                  model_data = model_data$`Cervus unicolor`, 
-                 stat = prop_zero, 
-                 title = "Proportion Zeros", binwidth = 0.005, xlims = c(0.4, 1))
+                 stat = funs[[i]], 
+                 integrated = T,
+                 title = titles[i])
+}
+
+cowplot::plot_grid(plotlist = ppc_sambar)
 ```
 
+#### Fallow Deer Model  
+
+```{r ppcFallow, fig.width = 6, fig.height = 6, message = F}
+funs <- c(prop_zero, mean, max, sd)
+titles <- c("Proportion zeros", "Mean", "Max", "SD")
+
+ppc_fallow <- list()
+
+for(i in 1:length(funs)) {
+ppc_fallow[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Dama dama"]], 
+                 model_data = model_data$`Dama dama`, 
+                 stat = funs[[i]], 
+                 integrated = T, only_det = F,
+                 title = titles[i])
+}
+
+cowplot::plot_grid(plotlist = ppc_fallow)
+```
+
+#### Red Deer Model  
+
+```{r ppcRed, fig.width = 6, fig.height = 6, message = F}
+funs <- c(prop_zero, mean, max, sd)
+titles <- c("Proportion zeros", "Mean", "Max", "SD")
+
+ppc_red <- list()
+
+for(i in 1:length(funs)) {
+ppc_red[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Cervus elaphus"]], 
+                 model_data = model_data$`Cervus elaphus`, 
+                 stat = funs[[i]], 
+                 integrated = F, only_det = F,
+                 title = titles[i])
+}
+
+cowplot::plot_grid(plotlist = ppc_red)
+```
+
+#### Hog Deer Model  
+
+```{r ppcRed, fig.width = 6, fig.height = 6, message = F}
+funs <- c(prop_zero, mean, max, sd)
+titles <- c("Proportion zeros", "Mean", "Max", "SD")
+
+ppc_hog <- list()
+
+for(i in 1:length(funs)) {
+ppc_hog[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Axis porcinus"]], 
+                 model_data = model_data$`Axis porcinus`, 
+                 stat = funs[[i]], 
+                 integrated = F, only_det = F,
+                 title = titles[i])
+}
+
+cowplot::plot_grid(plotlist = ppc_hog)
+```

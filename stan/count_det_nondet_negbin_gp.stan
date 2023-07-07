@@ -99,7 +99,7 @@ transformed parameters {
   vector[trans] r = inv_logit(logit_trans_p);
   vector[n_site] log_lambda_psi;
   // negbin dispersion
-  real phi;
+  real<lower=0> phi;
   phi = 1. / reciprocal_phi;
   // vector[n_site] logit_psi;
   // vector[n_site] log_psi;
@@ -136,7 +136,7 @@ for(n in 1:n_site) {
     lambda[n,j] = exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n];
   }
 
-  // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
+// Royle-Nichols implementation in STAN (looping over possible discrete values of N)
 // https://discourse.mc-stan.org/t/royle-and-nichols/14150
 // https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
 if (n_survey[n] > 0) {
@@ -190,7 +190,6 @@ generated quantities {
   array[n_site, max_int_dist+1] real DetCurve;
   array[n_site, n_gs] real log_lik1;
   array[n_site, n_gs] real log_lik2;
-  array[n_site] real log_lik3;
   array[n_site] real log_lik;
   vector[n_site] Site_lambda;
   vector[n_site] psi;
@@ -206,10 +205,7 @@ for(n in 1:n_site) {
   n_obs_pred[n,j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n], phi));
     }
     // get loglik on a site level
-    log_lik3[n] = lp_site[n];
-    log_lik[n] += log_sum_exp(log_lik1[n,]);
-    log_lik[n] += log_sum_exp(log_lik2[n,]);
-    log_lik[n] +=  log_lik3[n];
+    log_lik[n] = log_sum_exp(log_sum_exp(log_sum_exp(log_lik1[n,]), log_sum_exp(log_lik2[n,])), lp_site[n]);
     Site_lambda[n] = exp(log_lambda_psi[n]);
     N_site[n] = sum(n_obs_true[n,]);
     N_site_pred[n] = sum(n_obs_pred[n,]);

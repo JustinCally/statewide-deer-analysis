@@ -76,7 +76,7 @@ transformed parameters {
   real log_activ = log(activ);
   vector[n_site] log_lambda_psi;
   // negbin dispersion
-  real phi;
+  real<lower=0> phi;
   phi = 1. / reciprocal_phi;
   // GP params
   vector[n_site] gp_predict = cholesky_decompose(gp_exp_quad_cov(coords, alpha, rho) +
@@ -155,8 +155,7 @@ for(n in 1:n_site) {
   n_obs_true[n, j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log(eps_ngs[j])), phi));
   n_obs_pred[n,j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n], phi));
     }
-    log_lik[n] += log_sum_exp(log_lik1[n,]);
-    log_lik[n] += log_sum_exp(log_lik2[n,]);
+    log_lik[n] = log_sum_exp(log_sum_exp(log_lik1[n,]), log_sum_exp(log_lik2[n,]));
     Site_lambda[n] = exp(log_lambda_psi[n]);
     N_site[n] = sum(n_obs_true[n,]);
     N_site_pred[n] = sum(n_obs_pred[n,]);

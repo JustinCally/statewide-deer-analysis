@@ -184,7 +184,6 @@ generated quantities {
   array[n_site, max_int_dist+1] real DetCurve;
   array[n_site, n_gs] real log_lik1;
   array[n_site, n_gs] real log_lik2;
-  array[n_site] real log_lik3;
   array[n_site] real log_lik;
   vector[n_site] Site_lambda;
   vector[n_site] psi;
@@ -200,10 +199,7 @@ for(n in 1:n_site) {
   n_obs_pred[n,j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n]));
     }
     // get loglik on a site level
-    log_lik3[n] = lp_site[n];
-    log_lik[n] += log_sum_exp(log_lik1[n,]);
-    log_lik[n] += log_sum_exp(log_lik2[n,]);
-    log_lik[n] +=  log_lik3[n];
+    log_lik[n] = log_sum_exp(log_sum_exp(log_sum_exp(log_lik1[n,]), log_sum_exp(log_lik2[n,])), lp_site[n]);
     Site_lambda[n] = exp(log_lambda_psi[n]);
     N_site[n] = sum(n_obs_true[n,]);
     N_site_pred[n] = sum(n_obs_pred[n,]);
