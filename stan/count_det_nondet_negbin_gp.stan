@@ -155,6 +155,8 @@ if (n_survey[n] > 0) {
       + bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
     }
     lp_site[n] = log_sum_exp(lp);
+  } else{
+    lp_site[n] = 0;
   }
 
   }

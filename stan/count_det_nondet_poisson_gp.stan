@@ -94,7 +94,7 @@ transformed parameters {
   vector[trans] logit_trans_p = trans_pred_matrix * beta_trans_det; // observation process model
   // lp_site for RN model
   vector[n_site] lp_site;
-  vector[trans] r = inv_logit(logit_trans_p);
+  vector<lower=0,upper=1>[trans] r = inv_logit(logit_trans_p);
   vector[n_site] log_lambda_psi;
   // vector[n_site] logit_psi;
   // vector[n_site] log_psi;
@@ -131,7 +131,7 @@ for(n in 1:n_site) {
     lambda[n,j] = exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n];
   }
 
-  // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
+// Royle-Nichols implementation in STAN (looping over possible discrete values of N)
 // https://discourse.mc-stan.org/t/royle-and-nichols/14150
 // https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
 if (n_survey[n] > 0) {
@@ -150,6 +150,8 @@ if (n_survey[n] > 0) {
       + bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
     }
     lp_site[n] = log_sum_exp(lp);
+  } else{
+    lp_site[n] = 0;
   }
 
   }
@@ -159,7 +161,7 @@ model {
   beta_det ~ normal(0, 4); // prior for sigma
   eps_ngs ~ uniform(0, 1); // prior for group size effect
   beta_psi ~ normal(0, 2); // prior for poisson model
-  beta_trans_det ~ normal(0, 1); // beta for transect detection
+  beta_trans_det ~ normal(0, 4); // beta for transect detection
   activ ~ beta(bshape, bscale);  //informative prior
   //log_theta ~ normal(2,2);
   // GP priors
