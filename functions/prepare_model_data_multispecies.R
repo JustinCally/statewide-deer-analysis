@@ -266,6 +266,11 @@ prepare_model_data_multispecies <- function(species,
     dplyr::mutate(surveyed = dplyr::coalesce(surveyed, 0),
                   site = as.numeric(factor(SiteID)))
 
+  transects_ne_all <- site_vars %>%
+    dplyr::left_join(transects) %>%
+    dplyr::mutate(surveyed = dplyr::coalesce(surveyed, 0),
+                  site = as.numeric(factor(SiteID)))
+
   transects_ne_f <- transects_ne %>%
     dplyr::filter(surveyed > 0)
 
@@ -289,20 +294,24 @@ prepare_model_data_multispecies <- function(species,
   transect_mm <- model.matrix(object = transect_formula, data = transects_grouped)
 
   # If include cameras in the transect this bit is duplicated
-  cam_max <- apply(n_obs, MARGIN = c(1,2), FUN = function(x) {
+  cam_max <- apply(n_obs, MARGIN = c(1,3), FUN = function(x) {
     m <- max(x)
     if(m > 0) {
       m <- 1
     }
     return(m)
-  }) %>% apply(., MARGIN = 1, FUN = max)
+  })
 
-  any_seen <- rep(0, n_site)
+  any_seen <- matrix(0, nrow = length(species), ncol = n_site)
+  for(k in 1:length(species)) {
   for (i in 1:n_site) {
     if (n_survey[i] > 0) {
-      any_seen[i] <- max(transects_ne$Presence[start_idx[i]:end_idx[i]], na.rm = T)
+      tran_sp <- transects_ne_all %>%
+        dplyr::filter(Species == species[k])
+      any_seen[k,i] <- max(tran_sp$Presence[start_idx[i]:end_idx[i]], na.rm = T)
     }
-    any_seen[i] <- max(c(any_seen[i], cam_max[i]))
+    any_seen[k,i] <- max(c(any_seen[k,i], cam_max[i, k]))
+  }
   }
 
   # Restrict n_max

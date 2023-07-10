@@ -15,7 +15,7 @@ data {
   array[n_site, n_distance_bins, n_gs] int y; // observations matrix
 
   // summary of whether species is known to be present at each site
-  int<lower = 0, upper = 1> any_seen[n_site];
+  int<lower = 0, upper = 1> any_seen[S, n_site];
 
   // number of surveys at each site
   int<lower = 0> n_survey[n_site];
@@ -40,7 +40,7 @@ data {
   int<lower = 0, upper = trans> end_idx[n_site];
   int<lower=1> trans_det_ncb;           // number of covariates for transect detection model
   matrix[trans, trans_det_ncb] trans_pred_matrix; // transect detection model matrix
-  int<lower=1>  n_max[n_site]; // max for poisson RN
+  int<lower=1>  n_max[n_site, S]; // max for poisson RN
 
   // GP param
   array[n_site] vector[2] coords;
@@ -130,23 +130,24 @@ for(n in 1:n_site) {
 // https://discourse.mc-stan.org/t/royle-and-nichols/14150
 // https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
 if (n_survey[n] > 0) {
-  array[S,n_max[n] - any_seen[n] + 1] real lp;
-  array[S] real lp_sum;
+array[S] real lp_sum;
   for(k in 1:S) {
+  array[n_max[n,k] - any_seen[k,n] + 1] real lp;
+
 // seen
-    if(any_seen[n] == 0){ // not seen
-      lp[k,1] = poisson_lpmf(0 | exp(log_lambda_psi[k,n]));
+    if(any_seen[k,n] == 0){ // not seen
+      lp[1] = poisson_lpmf(0 | exp(log_lambda_psi[k,n]));
     }
 // not seen
 // lp 1 simplification (not necessary)
-    else lp[k,1] = poisson_lpmf(1 | exp(log_lambda_psi[k,n])) +
+    else lp[1] = poisson_lpmf(1 | exp(log_lambda_psi[k,n])) +
     bernoulli_lpmf(y2[k,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
      // loop through possible values for maximum count (km2)
-    for (j in 2:(n_max[n] - any_seen[n] + 1)){
-      lp[k,j] = poisson_lpmf(any_seen[n] + j - 1 | exp(log_lambda_psi[k,n]))
-      + bernoulli_lpmf(y2[k,start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
+    for (j in 2:(n_max[n,k] - any_seen[k,n] + 1)){
+      lp[j] = poisson_lpmf(any_seen[k,n] + j - 1 | exp(log_lambda_psi[k,n]))
+      + bernoulli_lpmf(y2[k,start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[k,n] + j - 1));
     }
-    lp_sum[k] = log_sum_exp(lp[k,]);
+    lp_sum[k] = log_sum_exp(lp);
   }
   lp_site[n] = log_sum_exp(lp_sum);
   } else{
