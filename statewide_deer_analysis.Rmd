@@ -60,6 +60,7 @@ project_short_name <- c("hog_deer_2023", "StatewideDeer")
 spatial_buffer <- 1000
 # Covariate Rasters
 raster_files <- "/Volumes/DeerVic\ Photos/Processed_Rasters"
+raster_files <- "data/prediction_raster"
 prediction_raster <- "data/prediction_raster/vic_model_data_resampled.tif"
 n_max_no_det <- 10
 n_max_det <- 50
@@ -88,6 +89,34 @@ cams_curated <- tbl(con, dbplyr::in_schema("camtrap", "curated_camtrap_operation
 ## Create model data 
 
 Using the `prepare_model_data()` function we generate the data for the `STAN` model. 
+
+```{r MultispeciesMD}
+multispecies_md <- prepare_model_data_multispecies(species = "All deer",
+                                 projects = project_short_name,
+                     buffer = spatial_buffer,
+                     detection_formula = det_formula,
+                     abundance_formula = ab_formula,
+                     transect_formula = transect_formula,
+                     con = con,
+                     raster_dir = raster_files,
+                     prediction_raster = prediction_raster,
+                     n_max_no_det = n_max_no_det,
+                     n_max_det = n_max_det,
+                     evaltransects = TRUE,
+                     snapshot_interval = 2)
+
+multispecies_md_fit <- model_poisson_ms$sample(data = multispecies_md,
+                                         chains = 2,
+                                 parallel_chains = 2, 
+                                 # init = inits, 
+                                 max_treedepth = 10,
+                                 # adapt_delta = 0.9,
+                                 show_messages = TRUE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = 200, 
+                                 iter_warmup = 200)
+```
+
 
 ```{r ModelData}
 model_data_file <- "data/model_data.rds"
@@ -138,6 +167,8 @@ model_negbin_co <- cmdstan_model(here::here("stan", "count_only_negbin_gp.stan")
 model_negbin <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_gp.stan"))
 model_poisson <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_gp.stan"))
 model_poisson_co <- cmdstan_model(here::here("stan", "count_only_poisson_gp.stan"))
+# multispecies model 
+model_poisson_ms <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_gp_ms.stan"))
 ```
 
 ## Fit models  
