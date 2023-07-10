@@ -11,7 +11,7 @@ calc_point_distances = function(coords, coords2){
 }
 
 predict_gp <- function(iter, alpha, rho, obs_gp_function, obs_distances, pred_distances,
-                       obs_to_pred_distances, beta, Xpred, OS, phi, dist = "negbin",
+                       obs_to_pred_distances, beta, Xpred, OS, phi = NULL, dist = "negbin",
                        kernel = c("quad","matern32","matern52","exp")){
   # Estimated covariance kernel for the fitted points
   kern_quad<- function(x, alpha, rho) {
@@ -38,7 +38,9 @@ predict_gp <- function(iter, alpha, rho, obs_gp_function, obs_distances, pred_di
   alpha<- alpha[iter]
   rho<- rho[iter]
   beta<- beta[iter,]
+  if(dist == "negbin") {
   phi <- phi[iter]
+  }
   K_obs <- kern(obs_distances, alpha, rho) + diag(1e-9, dim(obs_distances)[1])
 
 

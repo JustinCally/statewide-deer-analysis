@@ -14,6 +14,10 @@ prepare_model_data <- function(species,
                                evaltransects = TRUE,
                                snapshot_interval = 2) {
 
+  if(species == "All deer") {
+    species <- c("Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
+  }
+
   # Camera information
   theta <- 40 * pi / 180 # camera angle in radians
 
@@ -202,13 +206,30 @@ prepare_model_data <- function(species,
   # Load in transects that have been assifgned to species
   # source("functions/species_assign.R")
   # source("species_assign_wrangle.R")
-  filepath_det <- paste0("data/transects/",stringr::str_replace_all(species, " ", "_"), "_Detection.rds")
-  Deer_Detection <- readRDS(filepath_det)
+
+  filepath_det <- sapply(species, function(x) paste0("data/transects/",stringr::str_replace_all(x, " ", "_"), "_Detection.rds"))
+  filepath_det<- filepath_det[sapply(filepath_det, file.exists)]
+  Deer_Detection <- lapply(filepath_det, readRDS)
+  Deer_Detection <- dplyr::bind_rows(Deer_Detection) %>%
+    dplyr::group_by(SiteID, Transect, Distance, Survey) %>%
+    dplyr::summarise(Count = max(Count, na.rm = T),
+              Presence = max(Presence, na.rm = T)) %>%
+    dplyr::ungroup()
+
+  # filter deer detections to only include methods that detected deer
+  methods_of_det <- Deer_Detection %>%
+    dplyr::filter(Presence == 1) %>%
+    dplyr::pull(Survey) %>%
+    unique()
+
+  Deer_Detection <- Deer_Detection %>%
+    dplyr::filter(Survey %in% methods_of_det)
 
   presence_absence <-  dplyr::tbl(con,
                                   dbplyr::in_schema("camtrap", "processed_site_substation_presence_absence")) %>%
     dplyr::filter(scientific_name %in% species & ProjectShortName %in% !!projects) %>%
-    dplyr::transmute(SiteID, Survey = "Camera", Presence, Count = 1) %>%
+    dplyr::group_by(SiteID, Presence) %>%
+    dplyr::summarise(Survey = "Camera", Count = Presence) %>%
     dplyr::collect()
 
   transects <- Deer_Detection %>%

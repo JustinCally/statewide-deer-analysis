@@ -53,7 +53,7 @@ sapply(list.files("functions", full.names = T), source, verbose = F)
 
 ```{r data_params}
 # Species to run model for.
-deer_species_all <- c("Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
+deer_species_all <- c("All deer", "Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
 # Projects to select.
 project_short_name <- c("hog_deer_2023", "StatewideDeer")
 # Buffer for data extraction.
@@ -92,7 +92,7 @@ Using the `prepare_model_data()` function we generate the data for the `STAN` mo
 ```{r ModelData}
 model_data_file <- "data/model_data.rds"
 if(!file.exists(model_data_file)) {
-evaluate_transects <- c(TRUE, TRUE, TRUE, FALSE)
+evaluate_transects <- c(TRUE, TRUE, TRUE, TRUE, FALSE)
 model_data <- list()
 for(i in 1:length(deer_species_all)) {
 model_data[[i]] <- prepare_model_data(species = deer_species_all[i],
@@ -127,23 +127,13 @@ nw <- 250
 nt <- 1
 nb <- 300
 nc <- 6
-
-# Inits for model. 
-inits = lapply(1:nc, function(i) list(beta_det = as.array(runif(1)), 
-                                      activ = 0.35,
-                                      alpha = 3, rho=0.08,
-                                      phi = runif(1),
-                                      site_sd = runif(1),
-                                      reciprocal_phi = runif(1),
-                                      site_raw = rnorm(317),
-                                      eta = rnorm(317)))
 ```
 
 # Models  
 
 ## Read in Models  
 
-```{r models, echo = FALSE}
+```{r models, echo = FALSE, warning=FALSE}
 model_negbin_co <- cmdstan_model(here::here("stan", "count_only_negbin_gp.stan"))
 model_negbin <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_gp.stan"))
 model_poisson <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_gp.stan"))
@@ -156,22 +146,35 @@ model_poisson_co <- cmdstan_model(here::here("stan", "count_only_poisson_gp.stan
 distributions <- c("negbin", "poisson")
 model_fits <- list()
 
-for(j in 1:length(distributions)) {
+for(j in 2:length(distributions)) {
 
-  for(i in 1:length(deer_species_all)) {
+  for(i in 2:length(deer_species_all)) {
 
   if(evaluate_transects[i]) {
     model_to_fit <- get(paste0("model_", distributions[j]))
   } else {
     model_to_fit <- get(paste0("model_", distributions[j], "_co"))
   }
+    
+    # Inits for model. 
+# inits = lapply(1:nc, function(x) list(beta_det = as.array(runif(model_data[[i]][["det_ncb"]])), 
+#                                       beta_trans_det = as.array(rnorm(model_data[[i]][["trans_det_ncb"]], sd = 2)),
+#                                       activ = rbeta(1, 
+#                                                     shape1 = model_data[[i]][["bshape"]], 
+#                                                     shape2 = model_data[[i]][["bscale"]]),
+#                                       alpha = runif(1), 
+#                                       rho=runif(1),
+#                                       eta = rnorm(model_data[[i]][["n_site"]]), 
+#                                       eps_ngs=rep(1/model_data[[i]][["n_gs"]], model_data[[i]][["n_gs"]]), 
+#                                       beta_psi=runif(model_data[[i]][["m_psi"]]), 
+#                                       reciprocal_phi = 1))
 
   model_fits[[i]] <- model_to_fit$sample(data = model_data[[i]],
                                          chains = nc,
                                  parallel_chains = nc, 
-                                 init = inits,
+                                 # init = inits, 
                                  max_treedepth = 14,
-                                 adapt_delta = 0.9,
+                                 # adapt_delta = 0.9,
                                  show_messages = TRUE,
                                  save_warmup = FALSE,
                                  iter_sampling = ni, 
@@ -207,7 +210,7 @@ names(model_fits) <- stringr::str_replace_all(models_to_read, pattern = ".rds", 
 ```{r}
 loo_compares <- list()
 loo_compare_tables <- list()
-for(i in 1:length(deer_species_all)) {
+for(i in 2:length(deer_species_all)) {
   which_models <- model_fits[stringr::str_detect(models_to_read, pattern = deer_species_all[i])]
   
   loo_compares[[i]] <- list()
@@ -240,9 +243,29 @@ loo_table_all <- bind_rows(loo_compare_tables) %>%
 
 ### Posterior predictive checks  
 
+#### All Deer Model. 
+
+```{r ppcAll, fig.width = 6, fig.height = 6, message = F}
+funs <- c(prop_zero, mean, max, sd)
+titles <- c("Proportion zeros", "Mean", "Max", "SD")
+
+ppc_all <- list()
+
+for(i in 1:length(funs)) {
+ppc_all[[i]] <- posterior_checks(model = model_fits[["fit_negbin_All deer"]], 
+                 model_data = model_data$`All deer`, 
+                 stat = funs[[i]], 
+                 integrated = T,
+                 title = titles[i])
+}
+
+cowplot::plot_grid(plotlist = ppc_all)
+```
+
 #### Sambar Deer Model. 
 
 ```{r ppcSambar, fig.width = 6, fig.height = 6, message = F}
+q95 <- function(x) quantile(x, 0.95)
 funs <- c(prop_zero, mean, max, sd)
 titles <- c("Proportion zeros", "Mean", "Max", "SD")
 
@@ -315,3 +338,94 @@ ppc_hog[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Axis porcinus"
 
 cowplot::plot_grid(plotlist = ppc_hog)
 ```
+
+
+## Model Predictions
+
+```{r}
+#### Generate Statewide Predictions ####
+#### Make predictions ####
+# selected model fits 
+model_fits_select <- model_fits[stringr::str_detect(names(model_fits), "poisson")]
+
+gp_preds_draws_all <- list()
+pred_raster_means <- list()
+for(i in 1:length(model_fits_select)) {
+  
+  is_negbin <- stringr::str_detect(names(model_fits_select)[i], "negbin")
+
+m_psi <- 1 + length(labels(terms(ab_formula))) # add intercept
+n_site <- model_data[[i]]$n_site
+
+# coordinates
+coords_pred_scaled <- model_data[[i]]$coords_pred
+coords <- model_data[[i]]$coords
+
+obs_gp_function_posterior <-  model_fits_select[[i]]$draws('gp_predict',format = "df")[,1:n_site]  # gp covariance estimates
+rho_posterior <- model_fits_select[[i]]$draws('rho', format = "df")$rho        # length scale
+alpha_posterior <- model_fits_select[[i]]$draws('alpha', format = "df")$alpha  # marginal variance
+beta_posterior<- model_fits_select[[i]]$draws('beta_psi', format = "df")[,1:m_psi] |> as.matrix()  # fixed effects
+# phi_posterior <- model_fits_select[[i]]$draws('phi', format = "df")$phi
+
+nsims <- 1
+iters <- sample(nrow(beta_posterior),
+                size = nsims)
+
+pred_raster_full <- terra::rast(prediction_raster)
+
+Xpred_full <- model_data[[i]]$X_pred_psi
+
+#Split predictions into chunks
+chunks <- 10
+pred_rows <- nrow(Xpred_full)
+
+split_chunks <- function(x,n) split(1:x, cut(seq(1:x), n, labels = FALSE))
+
+pred_chunks <- split_chunks(pred_rows, chunks)
+
+gp_preds_draws <- list()
+
+for(j in 1:chunks) {
+
+  cat("Starting chunk", i, "at", as.character(Sys.time()))
+
+  pred_grid <- pred_raster_full[pred_chunks[[j]],]
+
+  # pred_grid # prediction grid including covariates
+  OS<- rep(4, length(pred_chunks[[j]]))   # offset (cell size)
+  Xpred <- Xpred_full[pred_chunks[[j]],]
+
+  obs_distances <- calc_point_distances(coords)
+  pred_distances <- calc_point_distances(coords_pred_scaled[pred_chunks[[j]],]) #, upper=TRUE, diag=TRUE)
+  obs_to_pred_distances <- calc_point_distances(coords, coords_pred_scaled[pred_chunks[[j]],])
+
+  gp_preds <- bettermc::mclapply(X = as.list(iters),
+                                 FUN = predict_gp, obs_distances = obs_distances,
+                                 pred_distances = pred_distances,
+                                 obs_to_pred_distances = obs_to_pred_distances,
+                                 obs_gp_function = obs_gp_function_posterior,
+                                 alpha = alpha_posterior,
+                                 rho_posterior,
+                                 beta = beta_posterior,
+                                 Xpred = Xpred,
+                                 OS = OS,
+                                 dist = "poisson",
+                                 # phi = phi_posterior,
+                                 mc.progress = TRUE,
+                                 mc.cores = 4,
+                                 kernel = "quad")
+
+  gp_preds_draws[[j]] <- do.call(cbind, gp_preds) %>%
+    as.data.frame()
+}
+
+gp_preds_draws_all[[i]] <- dplyr::bind_rows(gp_preds_draws)
+saveRDS(gp_preds_draws_all[[i]], paste0("outputs/preds/gp_preds_draws_",deer_species_all[i],".rds"))
+
+pred_raster_means[[i]] <- terra::app(pred_raster_full[[stringr::str_remove_all(labels(terms(ab_formula)), "scale[(]|[)]|sqrt[(]")]], mean)
+terra::values(pred_raster_means[[i]])[!is.na(terra::values(pred_raster_means[[i]]))] <- apply(gp_preds_draws_all[[i]], 1, mean, na.rm = T)
+terra::writeRaster(pred_raster_means[[i]], paste0("outputs/rasters/pred_mean_",deer_species_all[i],".tif"), overwrite = TRUE)
+
+}
+```
+
