@@ -172,7 +172,7 @@ model {
   //log_theta ~ normal(2,2);
   // GP priors
   eta ~ std_normal();
-  rho ~ inv_gamma(22.8018, 4.94958);
+  rho ~ inv_gamma(8.91924, 1.72902);
   alpha ~ normal(0, 1);
 
   for(n in 1:n_site) {

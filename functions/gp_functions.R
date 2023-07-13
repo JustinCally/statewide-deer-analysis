@@ -11,7 +11,8 @@ calc_point_distances = function(coords, coords2){
 }
 
 predict_gp <- function(iter, alpha, rho, obs_gp_function, obs_distances, pred_distances,
-                       obs_to_pred_distances, beta, Xpred, OS, phi = NULL, dist = "negbin",
+                       obs_to_pred_distances, beta, Xpred, OS, rho_alpha_median = TRUE,
+                       phi = NULL, dist = "negbin", return_gp = FALSE,
                        kernel = c("quad","matern32","matern52","exp")){
   # Estimated covariance kernel for the fitted points
   kern_quad<- function(x, alpha, rho) {
@@ -35,8 +36,13 @@ predict_gp <- function(iter, alpha, rho, obs_gp_function, obs_distances, pred_di
 
   npred<- dim(pred_distances)[1]
   obs_gp_function<- as.vector(as.matrix(obs_gp_function[iter,]))
+  if(rho_alpha_median) {
+    alpha<- median(alpha)
+    rho<- median(rho)
+  } else {
   alpha<- alpha[iter]
   rho<- rho[iter]
+  }
   beta<- beta[iter,]
   if(dist == "negbin") {
   phi <- phi[iter]
@@ -55,6 +61,11 @@ predict_gp <- function(iter, alpha, rho, obs_gp_function, obs_distances, pred_di
   # Estimated mean for prediction points
   gp_pred<- t(K_new) %*% solve(K_obs, obs_gp_function) +
               MASS::mvrnorm(1, mu = rep(0, npred), Sigma = K_star - t(K_new) %*% solve(K_obs, K_new))
+
+  if(return_gp) {
+    return(gp_pred)
+  }
+
   lambda <- exp(Xpred %*% beta + log(OS) + gp_pred)
   gc(verbose = F)
   if(dist == "poisson") {

@@ -169,7 +169,7 @@ model {
   activ ~ beta(bshape, bscale);  //informative prior
   //log_theta ~ normal(2,2);
   // GP priors
-  rho ~ inv_gamma(22.8018, 4.94958);
+  rho ~ inv_gamma(8.91924, 1.72902);
 
   for(n in 1:n_site) {
   for(j in 1:n_gs) {

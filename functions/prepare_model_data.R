@@ -121,11 +121,11 @@ prepare_model_data <- function(species,
   det_model_matrix <- model.matrix(detection_formula, data = site_vars)
 
   #### Prediction Data ####
-  vic_model_data_resampled <- terra::rast(prediction_raster)
+  vic_model_data_resampled <- terra::rast(prediction_raster)[[stringr::str_remove_all(labels(terms(abundance_formula)), "scale[(]|[)]|sqrt[(]")]]
 
   site_loc_cells <- terra::cells(vic_model_data_resampled, terra::vect(site_locs))[,"cell"]
 
-  vic_model_data_resampled_df <- terra::as.data.frame(vic_model_data_resampled, xy = TRUE, cell = TRUE)
+  vic_model_data_resampled_df <- terra::as.data.frame(vic_model_data_resampled, xy = TRUE, cell = TRUE, na.rm = TRUE)
 
   ab_model_pred_matrix_full <- model.matrix(abundance_formula,
                                             data = bind_rows(combined_spatial_data_fix, vic_model_data_resampled_df))
@@ -139,9 +139,22 @@ prepare_model_data <- function(species,
   coords_pred <- data.frame(X = vic_model_data_resampled_df$x,
                             Y = vic_model_data_resampled_df$y)
 
+  xrange <- max(coords_pred$X) - min(coords_pred$X)
+  yrange <- max(coords_pred$Y) - min(coords_pred$Y)
+
+  smaller_range <- which.min(c(xrange, yrange))
+
+  if(smaller_range == 2) {
+    max_y <- yrange/xrange
+    max_x <- 1
+  } else {
+    max_y <- 1
+    max_x <- xrange/yrange
+  }
+
   coords_pred_scaled <- coords_pred
-  coords_pred_scaled$X <- scales::rescale(coords_pred$X, to = c(0,1))
-  coords_pred_scaled$Y <- scales::rescale(coords_pred$Y, to = c(0,1))
+  coords_pred_scaled$X <- scales::rescale(coords_pred$X, to = c(0,max_x))
+  coords_pred_scaled$Y <- scales::rescale(coords_pred$Y, to = c(0,max_y))
 
 
   coords <- sf::st_as_sf(cams_curated,

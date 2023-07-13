@@ -31,15 +31,15 @@ posterior_checks <- function(model, model_data, stat, title, integrated = F, onl
 
   model_draws <- model$draws("N_site_pred", format = "matrix")
 
-  q25 <- min(quantile(apply(model_draws, 1, stat, simplify = T), 0.01), do.call(stat, args = list(x = n_obs_totals[which_inc])))
-  q975 <- max(quantile(apply(model_draws, 1, stat, simplify = T), 0.99), do.call(stat, args = list(x = n_obs_totals[which_inc])))
+  qmin <- min(quantile(apply(model_draws, 1, stat, simplify = T), 0.005, na.rm = T), do.call(stat, args = list(x = n_obs_totals[which_inc])))
+  qmax <- max(quantile(apply(model_draws, 1, stat, simplify = T), 0.995, na.rm = T), do.call(stat, args = list(x = n_obs_totals[which_inc])))
 
     ppc_plots <- bayesplot::ppc_stat(n_obs_totals[which_inc],
                                      model_draws[,which_inc],
                                      stat=stat,
                                      ...) +
       ggplot2::ggtitle(label = title) +
-      ggplot2::xlim(q25, q975) +
+      ggplot2::scale_x_continuous(limits = c(qmin, qmax)) +
       ggplot2::theme_bw() +
       ggplot2::theme(legend.position = "top")
 

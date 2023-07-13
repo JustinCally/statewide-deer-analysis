@@ -10,3 +10,4 @@ stan/count_only_negbin_gp
 stan/count_only_poisson_gp
 stan/gp_prior_tune
 outputs/
+stan/count_only_poisson_gp_ms

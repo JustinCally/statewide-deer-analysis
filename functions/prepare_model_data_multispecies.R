@@ -139,9 +139,23 @@ prepare_model_data_multispecies <- function(species,
   coords_pred <- data.frame(X = vic_model_data_resampled_df$x,
                             Y = vic_model_data_resampled_df$y)
 
+  xrange <- max(coords_pred$X) - min(coords_pred$X)
+  yrange <- max(coords_pred$Y) - min(coords_pred$Y)
+
+  smaller_range <- which.min(c(xrange, yrange))
+
+  if(smaller_range == 2) {
+    max_y <- yrange/xrange
+    max_x <- 1
+  } else {
+    max_y <- 1
+    max_x <- xrange/yrange
+  }
+
+
   coords_pred_scaled <- coords_pred
-  coords_pred_scaled$X <- scales::rescale(coords_pred$X, to = c(0,1))
-  coords_pred_scaled$Y <- scales::rescale(coords_pred$Y, to = c(0,1))
+  coords_pred_scaled$X <- scales::rescale(coords_pred$X, to = c(0,max_x))
+  coords_pred_scaled$Y <- scales::rescale(coords_pred$Y, to = c(0,max_y))
 
 
   coords <- sf::st_as_sf(cams_curated,
@@ -149,9 +163,9 @@ prepare_model_data_multispecies <- function(species,
     sf::st_transform(3111) %>%
     sf::st_coordinates() %>%
     as.data.frame() %>%
-    dplyr::mutate(X = scales::rescale(X, to = c(0,1),
+    dplyr::mutate(X = scales::rescale(X, to = c(0,max_x),
                                       from = range(vic_model_data_resampled_df$x)),
-                  Y = scales::rescale(Y, to = c(0,1),
+                  Y = scales::rescale(Y, to = c(0,max_y),
                                       from = range(vic_model_data_resampled_df$y)))
 
   #### Model data boundries ####
