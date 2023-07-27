@@ -45,6 +45,9 @@ data {
 
   // GP param
   array[n_site] vector[2] coords;
+  // Prediction data
+  int<lower=1> npc;                 // number of prediction grid cells
+  matrix[npc, m_psi] X_pred_psi; // pred matrix
 }
 
 transformed data {
@@ -72,14 +75,19 @@ parameters {
   vector[trans_det_ncb] beta_trans_det;
   // temporal availability parameters
   real<lower=0, upper=1> activ;
-  real reciprocal_phi;
+  real phi_int;
   // GP params
-  real<lower=0> rho;    // GP length scale
-  real<lower=0> alpha;  // GP marginal sd
-  vector[n_site] eta;
+  // real<lower=0> rho;    // GP length scale
+  // real<lower=0> alpha;  // GP marginal sd
+  // vector[n_site] eta;
+  // site RE
+  real<lower=0> site_sd;
+  vector[n_site] site_raw;
 }
 
 transformed parameters {
+  // re
+  vector[n_site] eps_site; //site random effect
   // distance parameters
   array[n_site] real log_sigma;
   array[n_site] real sigma;
@@ -99,14 +107,13 @@ transformed parameters {
   vector[trans] r = inv_logit(logit_trans_p);
   vector[n_site] log_lambda_psi;
   // negbin dispersion
-  real<lower=0> phi;
-  phi = 1. / reciprocal_phi;
+  real<lower=0> phi[n_site];
   // vector[n_site] logit_psi;
   // vector[n_site] log_psi;
   // vector[n_site] log1m_psi;// site random effects
   // GP params
-  vector[n_site] gp_predict = cholesky_decompose(gp_exp_quad_cov(coords, alpha, rho) +
-                                diag_matrix(rep_vector(1e-9, n_site))) * eta;
+  // vector[n_site] gp_predict = cholesky_decompose(gp_exp_quad_cov(coords, alpha, rho) +
+  //                               diag_matrix(rep_vector(1e-9, n_site))) * eta;
 
 for(n in 1:n_site) {
   log_sigma[n] = det_model_matrix[n,] * beta_det;
@@ -121,9 +128,10 @@ for(n in 1:n_site) {
       log_p_raw[n,i,j] = log(p_raw_scale[n,i,j]);
       }
   }
-
 // define log lambda
-  log_lambda_psi[n] = X_psi[n,] * beta_psi + gp_predict[n];
+  eps_site[n] = site_sd * site_raw[n];
+  phi[n] = exp(phi_int + eps_site[n]);
+  log_lambda_psi[n] = X_psi[n,] * beta_psi ;
 // convert to occupancy psi
   // logit_psi[n] = inv_cloglog(log_lambda_psi[n]);
   // log_psi[n] = log_inv_logit(logit_psi[n]);
@@ -143,15 +151,15 @@ if (n_survey[n] > 0) {
   vector[n_max[n] - any_seen[n] + 1] lp;
 // seen
     if(any_seen[n] == 0){ // not seen
-      lp[1] = neg_binomial_2_lpmf(0 | exp(log_lambda_psi[n]), phi);
+      lp[1] = neg_binomial_2_lpmf(0 | exp(log_lambda_psi[n]), phi[n]);
     }
 // not seen
 // lp 1 simplification (not necessary)
-    else lp[1] = neg_binomial_2_lpmf(1 | exp(log_lambda_psi[n]), phi) +
+    else lp[1] = neg_binomial_2_lpmf(1 | exp(log_lambda_psi[n]), phi[n]) +
     bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
      // loop through possible values for maximum count (km2)
     for (j in 2:(n_max[n] - any_seen[n] + 1)){
-      lp[j] = neg_binomial_2_lpmf(any_seen[n] + j - 1 | exp(log_lambda_psi[n]), phi)
+      lp[j] = neg_binomial_2_lpmf(any_seen[n] + j - 1 | exp(log_lambda_psi[n]), phi[n])
       + bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
     }
     lp_site[n] = log_sum_exp(lp);
@@ -168,16 +176,18 @@ model {
   beta_psi ~ normal(0, 2); // prior for poisson model
   beta_trans_det ~ normal(0, 1); // beta for transect detection
   activ ~ beta(bshape, bscale);  //informative prior
-  reciprocal_phi ~ cauchy(0., reciprocal_phi_scale);
+  phi_int ~ normal(0, 0.5);
   //log_theta ~ normal(2,2);
   // GP priors
-  eta ~ std_normal();
-  rho ~ inv_gamma(8.91924, 1.72902);
-  alpha ~ normal(0, 1);
+  // eta ~ std_normal();
+  // rho ~ inv_gamma(51.2298, 13.1468);
+  // alpha ~ normal(0, 2);
+  site_sd ~ normal(0, 1);
+  site_raw ~ std_normal();
 
   for(n in 1:n_site) {
   for(j in 1:n_gs) {
-  n_obs[n,j] ~ neg_binomial_2(lambda[n,j], phi);
+  n_obs[n,j] ~ neg_binomial_2(lambda[n,j], phi[n]);
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
   target += lp_site[n];
@@ -195,16 +205,16 @@ generated quantities {
   array[n_site] real log_lik;
   vector[n_site] Site_lambda;
   vector[n_site] psi;
-  // array[npc] real pred;
-  // real Nhat;
+  array[npc] real pred;
+  real Nhat;
 
 
 for(n in 1:n_site) {
   for(j in 1:n_gs) {
   log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
-  log_lik2[n,j] = neg_binomial_2_lpmf(n_obs[n,j] | lambda[n,j], phi); //for loo
-  n_obs_true[n, j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log(eps_ngs[j])), phi));
-  n_obs_pred[n,j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n], phi));
+  log_lik2[n,j] = neg_binomial_2_lpmf(n_obs[n,j] | lambda[n,j], phi[n]); //for loo
+  n_obs_true[n, j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log(eps_ngs[j])), phi[n]));
+  n_obs_pred[n,j] = gs[j] * (neg_binomial_2_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n], phi[n]));
     }
     // get loglik on a site level
     log_lik[n] = log_sum_exp(log_sum_exp(log_sum_exp(log_lik1[n,]), log_sum_exp(log_lik2[n,])), lp_site[n]);
@@ -221,8 +231,8 @@ for(n in 1:n_site) {
     }
 }
 
-// for(i in 1:npc) {
-//   pred[i] = neg_binomial_2_rng(exp(X_pred_psi[i,] * beta_psi), phi) * prop_pred[i];
-// }
-// Nhat = sum(pred);
+for(i in 1:npc) {
+  pred[i] = neg_binomial_2_rng(exp(X_pred_psi[i,] * beta_psi), exp(phi_int)) * 4; //offset
+}
+Nhat = sum(pred);
 }

@@ -12,7 +12,12 @@ prepare_model_data <- function(species,
                                n_max_no_det,
                                n_max_det,
                                evaltransects = TRUE,
-                               snapshot_interval = 2) {
+                               snapshot_interval = 2,
+                               hs_df,
+                               hs_df_global,
+                               hs_scale_global, # ratio of expected non-zero to zero divided by total observation as per brms convention
+                               hs_scale_slab,
+                               hs_df_slab) {
 
   if(species == "All deer") {
     species <- c("Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
@@ -95,6 +100,48 @@ prepare_model_data <- function(species,
     sf::st_as_sf(., coords = c("Longitude", "Latitude"), crs = 4283) %>%
     sf::st_transform(3111)
 
+  # Bioregion in the state #
+  bioreg <- VicmapR::vicmap_query("open-data-platform:vbioreg100") %>%
+    VicmapR::collect()
+
+  #get class
+  bc <- bioreg %>%
+    dplyr::group_by(bioregion) %>%
+    dplyr::summarise(geometry = sf::st_combine(geometry)) %>%
+    dplyr::ungroup() %>%
+    # dplyr::arrange(bioregion) %>%
+    dplyr::mutate(bioregion_fact1 = as.integer(factor(bioregion))) %>%
+    sf::st_transform(3111)
+
+  #get bioregion class of sampled data
+  site_bioreg_test <- sf::st_join(site_locs, bc) %>%
+    dplyr::pull(bioregion_fact1)
+
+  bc_filtered <- bc %>%
+    dplyr::filter(bioregion_fact1 %in% site_bioreg_test) %>%
+    dplyr::mutate(bioregion_fact = as.integer(factor(bioregion)))
+
+  site_bioreg <- sf::st_join(site_locs, bc_filtered) %>%
+    dplyr::pull(bioregion_fact)
+
+  # region
+  reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
+    VicmapR::collect()
+
+  #get class
+  br <- reg %>%
+    dplyr::group_by(delwp_region) %>%
+    dplyr::summarise(geometry = sf::st_combine(geometry)) %>%
+    dplyr::ungroup() %>%
+    # dplyr::arrange(bioregion) %>%
+    dplyr::mutate(delwp_region_fact = as.integer(factor(delwp_region))) %>%
+    sf::st_transform(3111)
+
+  #get bioregion class of sampled data
+  site_reg <- sf::st_join(site_locs, br) %>%
+    dplyr::pull(delwp_region_fact)
+
+
   # Read in rasters
   processed_tifs <- list.files(raster_dir, full.names = TRUE)[stringr::str_detect(list.files(raster_dir), ".tif$")]
 
@@ -117,22 +164,74 @@ prepare_model_data <- function(species,
   combined_spatial_data_fix <- dplyr::mutate(combined_spatial_data,
                                              dplyr::across(c(dplyr::everything(), -SiteID), .fns = as.numeric))
 
+  # get evc RE
+  # evcs <- terra::extract(processed_stack$EVC, site_locs %>%
+  #                   sf::st_transform(3111) %>%
+  #                   sf::st_buffer(200), na.rm = T)
+
+  # evc_grouped <- evcs %>%
+  #   mutate(evc_fact = as.integer(EVC)) %>%
+  #   dplyr::group_by(ID, evc_fact, EVC) %>%
+  #   dplyr::summarise(n = n()) %>%
+  #   dplyr::arrange(ID, desc(n)) %>%
+  #   dplyr::filter(!is.na(EVC)) %>%
+  #   dplyr::group_by(ID) %>%
+  #   dplyr::slice(1) %>%
+  #   pull(evc_fact)
+
   # Basic detection model
   det_model_matrix <- model.matrix(detection_formula, data = site_vars)
 
+  # reproj_evc <- terra::project(processed_stack$EVC,
+  #                terra::rast(prediction_raster))
+
+  # reproj_evc[is.na(values(reproj_evc))] <- 8
+  # reproj_evc[values(reproj_evc) == 20] <- NA
+  # remove rocky outcrops (no sampled)
+
   #### Prediction Data ####
-  vic_model_data_resampled <- terra::rast(prediction_raster)[[stringr::str_remove_all(labels(terms(abundance_formula)), "scale[(]|[)]|sqrt[(]")]]
+  vic_model_data_resampled <- terra::rast(prediction_raster)[[stringr::str_subset(stringr::str_remove_all(labels(terms(abundance_formula)),
+                                                                                                          "scale[(]|[)]|sqrt[(]"),
+                                                                                  pattern = "[*]", negate = T)]]
 
   site_loc_cells <- terra::cells(vic_model_data_resampled, terra::vect(site_locs))[,"cell"]
 
   vic_model_data_resampled_df <- terra::as.data.frame(vic_model_data_resampled, xy = TRUE, cell = TRUE, na.rm = TRUE)
 
+  # picker <-  function(x, viable_numbers) {
+  #   min(viable_numbers[viable_numbers >= x])
+  # }
+  evc_groups <- readRDS("data/evc_groups.rds")
+
+  # evc_pred <- vic_model_data_resampled_df %>%
+  #   pull(EVC) %>%
+  #   as.integer()
+
+  # evc_pred[evc_pred == 3] <- 4
+  # evc_pred[evc_pred == 10] <- 8
+  # evc_pred[evc_pred == 20] <- 8
+  # evc_pred[evc_pred == 21] <- 20 #avoid skipping
+  # evc_grouped[evc_grouped == 21] <- 20
+
+  pred_bioreg_i <-  vic_model_data_resampled_df %>%
+    sf::st_as_sf(., coords = c("x", "y"), crs = 3111) %>%
+    sf::st_nearest_feature(bc_filtered)
+
+  pred_bioreg <- bc_filtered$bioregion_fact[pred_bioreg_i]
+
+  pred_reg_i <-  vic_model_data_resampled_df %>%
+    sf::st_as_sf(., coords = c("x", "y"), crs = 3111) %>%
+    sf::st_nearest_feature(br)
+
+  pred_reg <- br$delwp_region_fact[pred_reg_i]
+
   ab_model_pred_matrix_full <- model.matrix(abundance_formula,
-                                            data = bind_rows(combined_spatial_data_fix, vic_model_data_resampled_df))
+                                            data = bind_rows(combined_spatial_data_fix,
+                                                             vic_model_data_resampled_df))
 
   ab_model_pred_matrix <- ab_model_pred_matrix_full[(nrow(combined_spatial_data_fix)+1):nrow(ab_model_pred_matrix_full),]
   ab_model_matrix <- ab_model_pred_matrix_full[1:nrow(combined_spatial_data_fix),]
-  prop_pred <- rep(1, nrow(ab_model_pred_matrix))
+  prop_pred <- rep(prod(res(vic_model_data_resampled))/1e6, nrow(ab_model_pred_matrix))
 
   #### Coordinate data ####
   # coordinates
@@ -231,7 +330,7 @@ prepare_model_data <- function(species,
 
   # filter deer detections to only include methods that detected deer
   methods_of_det <- Deer_Detection %>%
-    dplyr::filter(Presence == 1) %>%
+    # dplyr::filter(Presence == 1) %>%
     dplyr::pull(Survey) %>%
     unique()
 
@@ -244,6 +343,18 @@ prepare_model_data <- function(species,
     dplyr::group_by(SiteID, Presence) %>%
     dplyr::summarise(Survey = "Camera", Count = Presence) %>%
     dplyr::collect()
+
+  if(species[1] == "Cervus elaphus") { #no records for this area
+    presence_absence2 <- dplyr::tbl(con,
+                                    dbplyr::in_schema("camtrap", "processed_site_substation_presence_absence")) %>%
+      dplyr::filter(scientific_name %in% "Axis porcinus" & ProjectShortName %in% "hog_deer_2023") %>%
+      dplyr::group_by(SiteID, Presence) %>%
+      dplyr::summarise(Survey = "Camera", Count = Presence) %>%
+      dplyr::collect() %>%
+      dplyr::mutate(Presence = 0, Count = 0)
+
+    presence_absence <- bind_rows(presence_absence, presence_absence2)
+  }
 
   transects <- Deer_Detection %>%
     dplyr::bind_rows(presence_absence) %>%
@@ -348,7 +459,22 @@ prepare_model_data <- function(species,
               prop_pred = prop_pred,
               coords = coords,
               coords_pred = coords_pred_scaled,
-              reciprocal_phi_scale = 1)
+              reciprocal_phi_scale = 1,
+              bioreg_sf = bc_filtered %>% sf::st_drop_geometry(),
+              site_bioreg = site_bioreg,
+              pred_bioreg = pred_bioreg,
+              np_bioreg = length(bc_filtered$bioregion_fact),
+              site_reg = site_reg,
+              pred_reg = pred_reg,
+              np_reg = length(unique(site_reg)),
+              np_evc = evc_groups$np_evc,
+              site_evc = evc_groups$site_evc,
+              pred_evc = evc_groups$pred_evc,
+              hs_df = hs_df,
+              hs_df_global = hs_df_global,
+              hs_scale_global = hs_scale_global, # ratio of expected non-zero to zero divided by total observation as per brms convention
+              hs_scale_slab = hs_scale_slab,
+              hs_df_slab = hs_df_slab)
   if(evaltransects) {
   data_trans <- list(trans = nrow(transects),
                      y2 = transects$Presence,

@@ -11,3 +11,9 @@ stan/count_only_poisson_gp
 stan/gp_prior_tune
 outputs/
 stan/count_only_poisson_gp_ms
+data/nv2005_evcbcs/.DS_Store
+data/nv2005_evcbcs/nv2005_evcbcs.cpg
+data/nv2005_evcbcs/nv2005_evcbcs.dbf
+data/nv2005_evcbcs/nv2005_evcbcs.prj
+data/nv2005_evcbcs/nv2005_evcbcs.shp
+data/nv2005_evcbcs/nv2005_evcbcs.shx

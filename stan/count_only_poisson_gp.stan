@@ -44,9 +44,6 @@ transformed data {
 }
 
 parameters {
-  // Site RE
-  real<lower=0> site_sd;
-  vector[n_site] site_raw;
  // abundance parameters
   simplex[n_gs] eps_ngs; // random variation in group size
   vector[m_psi] beta_psi;
@@ -62,8 +59,6 @@ parameters {
 }
 
 transformed parameters {
-  // re
-  vector[n_site] eps_site;
   // distance parameters
   array[n_site] real log_sigma;
   array[n_site] real sigma;
@@ -95,9 +90,8 @@ for(n in 1:n_site) {
       }
   }
 
-  eps_site[n] = site_sd * site_raw[n]; // site random effect sd centreing
 // define log lambda
-  log_lambda_psi[n] = X_psi[n,] * beta_psi + gp_predict[n] + eps_site[n];
+  log_lambda_psi[n] = X_psi[n,] * beta_psi + gp_predict[n];
 // convert to occupancy psi
   // logit_psi[n] = inv_cloglog(log_lambda_psi[n]);
   // log_psi[n] = log_inv_logit(logit_psi[n]);
@@ -119,10 +113,8 @@ model {
   activ ~ beta(bshape, bscale);  //informative prior
   // GP priors
   eta ~ std_normal();
-  rho ~ inv_gamma(16.152, 5.38782);
+  rho ~ inv_gamma(51.2298, 13.1468);
   alpha ~ normal(0, 1);
-  site_sd ~ normal(0, 1);
-  site_raw ~ std_normal();
 
   for(n in 1:n_site) {
   for(j in 1:n_gs) {

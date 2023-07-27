@@ -77,7 +77,7 @@ transformed parameters {
   vector[n_site] log_lambda_psi;
   // negbin dispersion
   real<lower=0> phi;
-  phi = 1. / reciprocal_phi;
+  reciprocal_phi = 1/sqrt(phi);
   // GP params
   vector[n_site] gp_predict = cholesky_decompose(gp_exp_quad_cov(coords, alpha, rho) +
                                 diag_matrix(rep_vector(1e-9, n_site))) * eta;
@@ -117,7 +117,7 @@ model {
   eps_ngs ~ uniform(0, 1); // prior for group size effect
   beta_psi ~ normal(0, 2); // prior for poisson model
   activ ~ beta(bshape, bscale);  //informative prior
-  reciprocal_phi ~ cauchy(0., reciprocal_phi_scale);
+  reciprocal_phi ~ cauchy(0, reciprocal_phi_scale);
   //log_theta ~ normal(2,2);
   // GP priors
   eta ~ std_normal();

@@ -29,6 +29,8 @@ library(sf)
 library(bayesplot)
 library(loo)
 library(gt)
+library(terra)
+library(caret)
 check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
 options(mc.cores=6)
 
@@ -61,19 +63,9 @@ spatial_buffer <- 1000
 # Covariate Rasters
 raster_files <- "/Volumes/DeerVic\ Photos/Processed_Rasters"
 # raster_files <- "data/prediction_raster"
-prediction_raster <- "data/prediction_raster/vic_model_data_resampled.tif"
-n_max_no_det <- 10
+prediction_raster <- "data/prediction_raster/statewide_raster.tif"
+n_max_no_det <- 15
 n_max_det <- 50
-```
-
-## Formulas for detection and abundance. 
-
-```{r formulas}
-#### Model formulas ####
-transect_formula <- ~Survey
-ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15) + scale(SLOPE) + scale(MRVBF) + scale(sqrt(ForestEdge))
-# Use an intercept only detection model to start with
-det_formula <- ~ 1 #scale(HerbaceousUnderstoryCover)
 ```
 
 ## Camera locations 
@@ -82,56 +74,90 @@ det_formula <- ~ 1 #scale(HerbaceousUnderstoryCover)
 cams_curated <- tbl(con, dbplyr::in_schema("camtrap", "curated_camtrap_operation")) %>%
   dplyr::filter(ProjectShortName %in% !!project_short_name) %>% # Only retrieve cam records for hog deer 2023
   dplyr::collect() %>%
-  dplyr::arrange(SiteID)
+  dplyr::arrange(SiteID) %>%
+  sf::st_as_sf(., coords = c("Longitude", "Latitude"), crs = 4283) 
 ```
+
+## Check for correlated predictors  
+
+```{r}
+#Get correlations 
+# Read in rasters
+processed_tifs <- list.files(raster_files, full.names = TRUE)[stringr::str_detect(list.files(raster_files), ".tif$")]
+
+processed_stack <- terra::rast(processed_tifs)
+#covariates
+covvals <-  dplyr::bind_cols(cams_curated %>%
+                                       dplyr::select(SiteID) %>%
+                               st_drop_geometry(),
+                                            exactextractr::exact_extract(x = processed_stack,
+                                                                         cams_curated %>% 
+                                                                           st_transform(3111) %>%
+                                                                           sf::st_buffer(1000),
+                                                                         fun = "mean",
+                                                                         colname_fun = function(values, fun_name, weights, fun_value, nvalues, nweights)  values)) %>%
+    sf::st_drop_geometry()
+
+cors <- cor(covvals %>% 
+                  select(-SiteID, -LANDMANAGER, -Elevation))
+
+remove_cor <- findCorrelation(cors, cutoff = 0.8, names = FALSE)
+# These are the following predictors able to be used, none of them have correlations exceeding 0.8
+colnames(cors)[-remove_cor]
+
+pred_cor <- cor(as.data.frame(rast(prediction_raster), na.rm = T))
+remove_pred_cor <- findCorrelation(pred_cor, cutoff = 0.7, names = FALSE)
+colnames(pred_cor)[-remove_pred_cor]
+```
+
+
+## Formulas for detection and abundance. 
+
+```{r formulas}
+#### Model formulas ####
+transect_formula <- ~Survey
+ab_formula <- list()
+ab_formula <- ~ scale(BIO04) + scale(BIO06) + scale(BIO15) + scale(sqrt(BareSoil)) + scale(NonPhotosyntheticVeg) + scale(sqrt(MRVBF)) + scale(Nitrogen) + scale(sqrt(PastureDistance)) + scale(sqrt(SLOPE)) + scale(TreeDensity) + scale(sqrt(ForestEdge)) + scale(sqrt(SLOPE) * BIO04) + scale(sqrt(ForestEdge) * BIO06) + scale(BIO15 * sqrt(BareSoil)) 
+
+ab_formula_2 <- ~ scale(BareSoil) + scale(Nitrogen) + scale(PastureDistance) + scale(TreeDensity) + scale(sqrt(ForestEdge))
+
+# ab_formula <- ~ scale(BIO04) + scale(BIO06) + scale(BIO15) + scale(NonPhotosyntheticVeg) + scale(sqrt(MRVBF)) + scale(sqrt(CrownGrazingDistance)) + scale(sqrt(PastureDistance)) + scale(sqrt(ForestEdge)) 
+det_formula <- ~ scale(HerbaceousUnderstoryCover) # average detection across all sites #scale(HerbaceousUnderstoryCover)
+det_formula2 <- ~1
+
+# ab_formula <- ~ scale(BIO12)  + scale(BIO04)  + scale(BIO01) + scale(TreeDensity) + scale(sqrt(PastureDistance)) + scale(TWIND) + scale(BIO15) + scale(SLOPE) + scale(MRVBF) + scale(sqrt(ForestEdge))
+# 
+# ab_formula <- ~ scale(BIO04)  + scale(BIO06) + scale(BIO15) + scale(TreeDensity) + scale(TWIND)  + scale(sqrt(ForestEdge))
+# ab_formula <- ~ 1
+# Use an intercept only detection model to start with
+# det_formula <- ~ 1 #scale(HerbaceousUnderstoryCover)
+```
+
+
 
 
 ## Create model data 
 
 Using the `prepare_model_data()` function we generate the data for the `STAN` model. 
 
-```{r MultispeciesMD, eval=FALSE}
-multispecies_md <- prepare_model_data_multispecies(species = "All deer",
-                                 projects = project_short_name,
-                     buffer = spatial_buffer,
-                     detection_formula = det_formula,
-                     abundance_formula = ab_formula,
-                     transect_formula = transect_formula,
-                     con = con,
-                     raster_dir = raster_files,
-                     prediction_raster = prediction_raster,
-                     n_max_no_det = n_max_no_det,
-                     n_max_det = n_max_det,
-                     evaltransects = TRUE,
-                     snapshot_interval = 2)
-
-saveRDS(multispecies_md, "data/multispecies_md.rds")
-
-multispecies_md_fit <- model_poisson_ms_co$sample(data = multispecies_md,
-                                         chains = 2,
-                                 parallel_chains = 2, 
-                                 refresh = 10, init = 0.1,
-                                 max_treedepth = 10,
-                                 show_messages = TRUE,
-                                 save_warmup = TRUE,
-                                 iter_sampling = 200, 
-                                 iter_warmup = 200)
-
-multispecies_md_fit$save_object("outputs/models/multispecies_poisson_co.rds")
-```
-
-
 ```{r ModelData}
 model_data_file <- "data/model_data.rds"
 if(!file.exists(model_data_file)) {
-evaluate_transects <- c(TRUE, TRUE, TRUE, TRUE, FALSE)
+evaluate_transects <- c(TRUE, TRUE, TRUE, TRUE, TRUE)
 model_data <- list()
 for(i in 1:length(deer_species_all)) {
+  
+  if(deer_species_all[i] == "Cervus elaphus") {
+    det_to_use <- det_formula2
+  } else {
+    det_to_use <- det_formula
+  }
+  
 model_data[[i]] <- prepare_model_data(species = deer_species_all[i],
                                  projects = project_short_name,
                      buffer = spatial_buffer,
-                     detection_formula = det_formula,
-                     abundance_formula = ab_formula,
+                     detection_formula = det_to_use,
+                     abundance_formula = ab_formula_2,
                      transect_formula = transect_formula,
                      con = con,
                      raster_dir = raster_files,
@@ -139,7 +165,12 @@ model_data[[i]] <- prepare_model_data(species = deer_species_all[i],
                      n_max_no_det = n_max_no_det,
                      n_max_det = n_max_det,
                      evaltransects = evaluate_transects[i],
-                     snapshot_interval = 2)
+                     snapshot_interval = 2, 
+                     hs_df = 1,
+                     hs_df_global = 1,
+                     hs_scale_global = 2/sqrt(nrow(cams_curated)), # ratio of expected non-zero to zero divided by total observation as per brms convention
+                     hs_scale_slab = 1,
+                     hs_df_slab = 4)
 
 }
 names(model_data) <- deer_species_all
@@ -151,27 +182,111 @@ saveRDS(model_data, model_data_file)
 
 ## Model settings  
 
+Below we list the MCMC setting for our model. We run models on eight parallel chains for 600 iterations each (300 warmup and 300 sampling). These setting provide us with 2,400 posterior draws (8 x 300).
+
+
 ```{r ModelSettings}
-#### Run models for all species ####
 # STAN settings
-ni <- 300
-nw <- 300
-nt <- 1
-nb <- 300
-nc <- 8
+ni <- 300 # sampling iterations
+nw <- 300 # warmup iterations 
+nc <- 8 # number of chains
 ```
+
+<!-- ## Select length-scale -->
+
+<!-- ```{r} -->
+<!-- prior_tune <- cmdstan_model(here::here("stan", "gp_prior_tune.stan")) -->
+
+<!-- priorfit<- prior_tune$sample(iter_sampling=1, iter_warmup=0, chains=1, -->
+<!--                                seed=5838298, fixed_param = TRUE) -->
+<!-- ``` -->
+
 
 # Models  
 
 ## Read in Models  
 
 ```{r models, echo = FALSE, warning=FALSE}
-model_poisson <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_gp.stan"))
-model_poisson_co <- cmdstan_model(here::here("stan", "count_only_poisson_gp.stan"))
+model_poisson <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_zi_hs.stan"))
+model_negbin <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_zi_hs.stan"))
+```
+
+
+```{r, eval = FALSE}
+# test_data <- model_data[[2]]
+# test_data$m_psi <- 5
+# test_data$X_psi <- model_data[[2]]$X_psi[,c(1,2,4,6,7)]
+# test_data$X_pred_psi <- model_data[[2]]$X_pred_psi[,c(1,2,4,6,7)]
+
+# model_data[[2]]$n_max[model_data[[2]]$n_max == 25] <- 35
+model_data[[2]][["site_evc"]][model_data[[2]][["site_evc"]] == 21] <- 20
+model_data[[2]][["pred_evc"]][model_data[[2]][["pred_evc"]] == 21] <- 20
+
+# model_data[[2]]$hs_df <- 1
+# model_data[[2]]$hs_df_global <- 1
+# model_data[[2]]$hs_df_slab <- 4
+# model_data[[2]]$hs_scale_global <- 1/sqrt(317)
+# model_data[[2]]$hs_scale_slab <- 2
+
+#save test data 
+sambar_test_data <- model_data[[3]]
+# saveRDS(model_data[[2]], "data/sambar_test_data.rds")
+# replace evc groups 
+evc_groups <- readRDS("data/evc_groups.rds")
+
+test <- model_poisson$sample(data = model_data[[5]],
+                                         chains = 8,
+                                 parallel_chains = 8, 
+                                 init = 0.1, 
+                                 max_treedepth = 10, 
+                                 refresh = 20, step_size = 0.1,
+                                 show_messages = TRUE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = 250, 
+                                 iter_warmup = 250)
+
+sambar_negbin <- model_negbin$sample(data = model_data[[2]],
+                                         chains = 8,
+                                 parallel_chains = 8, 
+                                 init = 0.1, 
+                                 max_treedepth = 10, 
+                                 refresh = 20, step_size = 0.1,
+                                 show_messages = TRUE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = 250, 
+                                 iter_warmup = 250)
+
+sambar_test$save_object("outputs/models/sambar_test.rds")
+pred_raster_full <- terra::rast(prediction_raster)
+  # reproj_evc <- terra::project(processed_stack$EVC,
+  #                pred_raster_full)
+
+  # reproj_evc[is.na(values(reproj_evc))] <- 8
+  # reproj_evc[values(reproj_evc) == 20] <- NA
+
+gp_preds_draws_all <- sambar_test$draws("pred_trunc", format = "matrix")
+
+gp_preds_draws_all_rest <- gp_preds_draws_all
+# gp_preds_draws_all_rest[gp_preds_draws_all_rest > 35] <- 35
+
+pred_raster_full <- rast(prediction_raster)
+
+pred_raster <- terra::app(c(pred_raster_full[[stringr::str_subset(
+  stringr::str_remove_all(labels(terms(ab_formula)),
+                          "scale[(]|[)]|sqrt[(]"), 
+  pattern = "[*]", negate = T)]], reproj_evc), mean)
+
+terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds_draws_all, 
+                                                                        2, 
+                                                                        mean, 
+                                                                        na.rm = T, 
+                                                                        trim = 0)
 ```
 
 
 ## Fit models  
+
+We can fit models using `cmdstanr`. Here we fit five models using a poisson distribution. One model for each of the four deer species as well as a model for 'all/any deer species'. 
 
 ```{r FitModels, eval = FALSE}
 distributions <- c("poisson")
@@ -186,26 +301,15 @@ for(j in 1:length(distributions)) {
   } else {
     model_to_fit <- get(paste0("model_", distributions[j], "_co"))
   }
-    
-    # Inits for model. 
-# inits = lapply(1:nc, function(x) list(beta_det = as.array(runif(model_data[[i]][["det_ncb"]])), 
-#                                       beta_trans_det = as.array(rnorm(model_data[[i]][["trans_det_ncb"]], sd = 2)),
-#                                       activ = rbeta(1, 
-#                                                     shape1 = model_data[[i]][["bshape"]], 
-#                                                     shape2 = model_data[[i]][["bscale"]]),
-#                                       alpha = runif(1), 
-#                                       rho=runif(1),
-#                                       eta = rnorm(model_data[[i]][["n_site"]]), 
-#                                       eps_ngs=rep(1/model_data[[i]][["n_gs"]], model_data[[i]][["n_gs"]]), 
-#                                       beta_psi=runif(model_data[[i]][["m_psi"]]), 
-#                                       reciprocal_phi = 1))
 
   model_fits[[i]] <- model_to_fit$sample(data = model_data[[i]],
                                          chains = nc,
                                  parallel_chains = nc, 
                                  init = 0.1, 
                                  max_treedepth = 10, 
-                                 refresh = 20,
+                                 refresh = 20, 
+                                 step_size = 0.1, 
+                                 adapt_delta = 0.99,
                                  show_messages = TRUE,
                                  save_warmup = FALSE,
                                  iter_sampling = ni, 
@@ -226,10 +330,8 @@ model_fits <- list()
 
 model_dir <- "outputs/models"
 
-models_to_read <- list.files(model_dir, full.names = FALSE)
-
 for(i in 1:length(deer_species_all)) {
-  model_fits[[i]] <- readRDS(paste0(model_dir, "/fit_poisson_", deer_species_all[i], ".rds"))
+  model_fits[[i]] <- readRDS(paste0(model_dir, "/fit_negbin_", deer_species_all[i], ".rds"))
 }
 
 names(model_fits) <-  paste0("fit_poisson_", deer_species_all)
@@ -278,15 +380,15 @@ loo_table_all <- bind_rows(loo_compare_tables) %>%
 #### All Deer Model. 
 
 ```{r ppcAll, fig.width = 6, fig.height = 6, message = F}
-q95 <- function(x) quantile(x, 0.95, na.rm = T)
+q99 <- function(x) quantile(x, 0.99, na.rm = T)
 sd_90 <- function (x, na.rm = FALSE) {
   quants <- quantile(x, c(0.05, 0.95), na.rm = T)
   x <- x[x < quants[2] & x > quants[1]]
   sqrt(var(if (is.vector(x) || is.factor(x)) x else as.double(x), 
     na.rm = na.rm))
 }
-funs <- c(prop_zero, mean, q95, sd_90)
-titles <- c("Proportion zeros", "Mean", "95% Percentile", "SD (5% - 95%)")
+funs <- c(prop_zero, mean, q99, sd_90)
+titles <- c("Proportion zeros", "Mean", "99% Percentile", "SD (5% - 95%)")
 
 ppc_all <- list()
 
@@ -306,11 +408,13 @@ cowplot::plot_grid(plotlist = ppc_all)
 ```{r ppcSambar, fig.width = 6, fig.height = 6, message = F}
 ppc_sambar <- list()
 
+funs <- c(prop_zero, mean, q95, sd)
+
 for(i in 1:length(funs)) {
 ppc_sambar[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Cervus unicolor"]], 
                  model_data = model_data$`Cervus unicolor`, 
                  stat = funs[[i]], 
-                 integrated = T,
+                 integrated = T, 
                  title = titles[i])
 }
 
@@ -343,7 +447,7 @@ titles <- c("Proportion zeros", "Mean", "Maximum", "SD")
 ppc_red <- list()
 
 for(i in 1:length(funs)) {
-ppc_red[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Cervus elaphus"]], 
+ppc_red[[i]] <- posterior_checks(model = model_fits[[4]], 
                  model_data = model_data$`Cervus elaphus`, 
                  stat = funs[[i]], 
                  integrated = T, only_det = F,
@@ -375,15 +479,53 @@ cowplot::plot_grid(plotlist = ppc_hog)
 
 ## Model Predictions
 
+```{r PredictionRasters}
+pred_raster_full <- terra::rast(prediction_raster)
+
+pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
+  stringr::str_remove_all(labels(terms(ab_formula_2)),
+                          "scale[(]|[)]|sqrt[(]"), 
+  pattern = "[*]", negate = T)]], mean)
+
+mean_raster <- list()
+
+for(i in 1:length(model_fits)) {
+
+gp_preds_draws_all <- model_fits[[i]]$draws("pred", format = "matrix")
+
+terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds_draws_all, 
+                                                                        2, 
+                                                                        mean, 
+                                                                        na.rm = T, 
+                                                                        trim = 0)
+
+mean_raster[[i]] <- pred_raster
+
+# pred_raster_evc <- pred_raster
+# values(pred_raster_evc)[!is.na(terra::values(pred_raster_evc))]  <- model_data$`Dama dama`$pred_bioreg
+}
+```
+
+
+
+
+
+
+
+
+
+
+# spatial 
 ```{r}
 #### Generate Statewide Predictions ####
 #### Make predictions ####
 # selected model fits 
-model_fits_select <- model_fits[stringr::str_detect(names(model_fits), "poisson")]
+# model_fits_select <- model_fits[stringr::str_detect(names(model_fits), "negbin")]
+model_fits_select <- list(NULL, sambar_test)
 
 gp_preds_draws_all <- list()
 pred_raster_means <- list()
-for(i in 1:length(model_fits_select)) {
+for(i in 2:2) { #length(model_fits_select)) {
   
   is_negbin <- stringr::str_detect(names(model_fits_select)[i], "negbin")
 
@@ -394,13 +536,13 @@ n_site <- model_data[[i]]$n_site
 coords_pred_scaled <- model_data[[i]]$coords_pred
 coords <- model_data[[i]]$coords
 
-obs_gp_function_posterior <-  model_fits_select[[i]]$draws('gp_predict',format = "df")[,1:n_site]  # gp covariance estimates
+obs_gp_function_posterior <- model_fits_select[[i]]$draws('gp_predict',format = "df")[,1:n_site] # gp covariance estimates
 rho_posterior <- model_fits_select[[i]]$draws('rho', format = "df")$rho        # length scale
 alpha_posterior <- model_fits_select[[i]]$draws('alpha', format = "df")$alpha  # marginal variance
 beta_posterior<- model_fits_select[[i]]$draws('beta_psi', format = "df")[,1:m_psi] |> as.matrix()  # fixed effects
-# phi_posterior <- model_fits_select[[i]]$draws('phi', format = "df")$phi
+phi_posterior <- model_fits_select[[i]]$draws('phi_int', format = "df")$phi_int
 
-nsims <- 50
+nsims <- 100
 iters <- sample(nrow(beta_posterior),
                 size = nsims)
 
@@ -409,7 +551,7 @@ pred_raster_full <- terra::rast(prediction_raster)
 Xpred_full <- model_data[[i]]$X_pred_psi
 
 #Split predictions into chunks
-chunks <- 8
+chunks <- 5
 pred_rows <- nrow(Xpred_full)
 
 split_chunks <- function(x,n) split(1:x, cut(seq(1:x), n, labels = FALSE))
@@ -441,12 +583,14 @@ for(j in 1:chunks) {
                                  rho = rho_posterior,
                                  beta = beta_posterior,
                                  Xpred = Xpred,
-                                 OS = OS, return_gp = FALSE,
+                                 OS = OS, 
+                                 return_gp = FALSE,
                                  rho_alpha_median = FALSE,
-                                 dist = "poisson",
-                                 # phi = phi_posterior,
+                                 dist = "negbin", 
+                                 phi_mod = FALSE, 
+                                 phi = phi_posterior,
                                  mc.progress = TRUE,
-                                 mc.cores = 10,
+                                 mc.cores = 5,
                                  kernel = "quad")
 
   gp_preds_draws[[j]] <- do.call(cbind, gp_preds) %>%
@@ -457,9 +601,19 @@ gp_preds_draws_all[[i]] <- dplyr::bind_rows(gp_preds_draws)
 saveRDS(gp_preds_draws_all[[i]], paste0("outputs/preds/gp_preds_draws_",deer_species_all[i],".rds"))
 
 pred_raster_means[[i]] <- terra::app(pred_raster_full[[stringr::str_remove_all(labels(terms(ab_formula)), "scale[(]|[)]|sqrt[(]")]], mean)
-terra::values(pred_raster_means[[i]])[!is.na(terra::values(pred_raster_means[[i]]))] <- apply(gp_preds_draws_all[[i]], 1, mean, na.rm = T, trim = 0.25)
+terra::values(pred_raster_means[[i]])[!is.na(terra::values(pred_raster_means[[i]]))] <- apply(gp_preds_draws_all[[i]], 1, mean, na.rm = T, trim = 0.5)
 terra::writeRaster(pred_raster_means[[i]], paste0("outputs/rasters/pred_mean_",deer_species_all[i],".tif"), overwrite = TRUE)
 
+}
+```
+
+```{r ReadPredictions}
+pred_raster_means <- list()
+
+for(i in 1:length(deer_species_all)) {
+  pred_raster_means[[i]] <- terra::rast(paste0("outputs/rasters/pred_mean_",
+                                               deer_species_all[i],
+                                               ".tif"))
 }
 ```
 

@@ -12,17 +12,20 @@ calc_point_distances = function(coords, coords2){
 
 predict_gp <- function(iter, alpha, rho, obs_gp_function, obs_distances, pred_distances,
                        obs_to_pred_distances, beta, Xpred, OS, rho_alpha_median = TRUE,
-                       phi = NULL, dist = "negbin", return_gp = FALSE,
+                       phi = NULL, dist = "negbin", return_gp = FALSE, phi_mod = FALSE,
                        kernel = c("quad","matern32","matern52","exp")){
+
+
   # Estimated covariance kernel for the fitted points
   kern_quad<- function(x, alpha, rho) {
     return(alpha^2 * exp(-x^2/ (2*rho^2)))
   }
+
   kern_matern32<- function(x, alpha, rho) {
     return(alpha^2 *(1 + (sqrt(3)*x)/rho) * exp(-(sqrt(3)*x)/rho))
   }
   kern_matern52<- function(x, alpha, rho) {
-    return(alpha^2 *(1 + (sqrt(5)*x)/(3*rho^2)) * exp(-(sqrt(5)*x)/rho))
+    return(alpha^2 *(1 + (sqrt(5)*x)/rho + (5*x^2)/(3*rho^2)) * exp(-(sqrt(5)*x)/rho))
   }
   kern_exp<- function(x, alpha, rho) {
     return(alpha^2 * exp(-x/rho))
@@ -56,22 +59,43 @@ predict_gp <- function(iter, alpha, rho, obs_gp_function, obs_distances, pred_di
   # Estimated covariance kernel for prediction points
   K_star <- kern(pred_distances, alpha, rho) + diag(1e-9, npred)
 
-  gc(verbose = F)
-
   # Estimated mean for prediction points
-  gp_pred<- t(K_new) %*% solve(K_obs, obs_gp_function) +
-              MASS::mvrnorm(1, mu = rep(0, npred), Sigma = K_star - t(K_new) %*% solve(K_obs, K_new))
+  gp_pred<- t(K_new) %*% solve(K_obs, obs_gp_function)
+
+  # gp_pred<- t(K_new) %*% solve(K_obs, obs_gp_function) +
+  #   as.vector(mvnfast::rmvn(n = 1, mu = rep(0, npred),
+  #                 sigma = K_star - t(K_new) %*% solve(K_obs, K_new)))
+
+  # gp_pred3<- t(K_new) %*% solve(K_obs, obs_gp_function) +
+  #   rowMeans(MASS::mvrnorm(n = 10, mu = rep(0, npred),
+  #                           Sigma = K_star - t(K_new) %*% solve(K_obs, K_new)))
+
+  gc(verbose = F)
 
   if(return_gp) {
     return(gp_pred)
   }
 
-  lambda <- exp(Xpred %*% beta + log(OS) + gp_pred)
-  gc(verbose = F)
+  fe <- Xpred %*% beta
+
+  if(phi_mod) {
+    phi_add <- exp(phi + gp_pred)
+    lambda <- exp(fe + log(OS))
+  } else {
+    phi_add <- exp(phi)
+    lambda <- exp(fe + log(OS) + gp_pred)
+  }
+
   if(dist == "poisson") {
-  return(rpois(npred, lambda))
+    rb <- rpois(n = npred, lambda = lambda)
+    # rb[rb > 200] <- 200
+  return(rb)
     } else if(dist == "negbin") {
-      return(rnbinom(n = npred, mu = lambda, size = phi))
+      rb <- rnbinom(n = npred, mu = lambda, size = phi_add)
+      # rb[rb > 200] <- 200
+      return(rb)
+    } else if(dist == "lambda") {
+      return(lambda)
     }
 
 }
