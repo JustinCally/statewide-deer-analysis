@@ -190,9 +190,9 @@ prepare_model_data <- function(species,
   # remove rocky outcrops (no sampled)
 
   #### Prediction Data ####
-  vic_model_data_resampled <- terra::rast(prediction_raster)[[stringr::str_subset(stringr::str_remove_all(labels(terms(abundance_formula)),
-                                                                                                          "scale[(]|[)]|sqrt[(]"),
-                                                                                  pattern = "[*]", negate = T)]]
+  vic_model_data_resampled <- terra::rast(prediction_raster)[[unique(stringr::str_subset(stringr::str_remove_all(labels(terms(abundance_formula)),
+                                                                                                          "scale[(]|[)]|sqrt[(]|I[(]|[\\^]2"),
+                                                                                  pattern = "[*]", negate = T))]]
 
   site_loc_cells <- terra::cells(vic_model_data_resampled, terra::vect(site_locs))[,"cell"]
 

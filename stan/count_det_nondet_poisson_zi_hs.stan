@@ -94,10 +94,14 @@ data {
 transformed data {
   // vector[n_distance_bins] pi; // availability for point
   vector[n_site] survey_area;
-  vector[n_site] cam_seen;
+  array[n_site] int cam_seen;
     for(i in 1:n_site) {
       survey_area[i] = theta_frac * effort[i] * pi() * (max_distance/1000)^2;
-      cam_seen[i] = sum(n_obs[i,]);
+      if(sum(n_obs[i,]) > 0) {
+      cam_seen[i] = 1;
+      } else {
+        cam_seen[i] = 0;
+      }
     }
 
 
@@ -116,6 +120,8 @@ parameters {
   // vector[m_psi] beta_psi;
   // detection parameters
   vector[det_ncb] beta_det;
+  // zero inflation probability
+  // vector[m_psi] beta_zi;
   //real<lower=0> theta;
   // transect detection parameters
   vector[trans_det_ncb] beta_trans_det;
@@ -131,12 +137,17 @@ parameters {
   // real<lower=0> evc_sd;
   // vector[np_evc] evc_raw;
   // site re
+  // real site_mu;
   // real<lower=0> site_sd;
   // vector[n_site] site_raw;
   // bioregion RE
   real bioregion_mu;
   real<lower=0> bioregion_sd;
   vector[np_bioreg] bioregion_raw;
+  // bioregion zi process
+  // real bioregion_mu_zi;
+  // real<lower=0> bioregion_sd_zi;
+  // vector[np_bioreg] bioregion_raw_zi;
   // region RE
   // real region_mu;
   // real<lower=0> region_sd;
@@ -147,6 +158,7 @@ parameters {
   // horseshoe shrinkage parameters
   real<lower=0> hs_global[2];
   real<lower=0> hs_c2;
+  // real<lower=-1,upper=1> zid;
 }
 
 transformed parameters {
@@ -154,6 +166,7 @@ transformed parameters {
   // vector[n_site] eps_site;
   // vector[np_evc] eps_evc; // bioregion random effect
   vector[np_bioreg] eps_bioregion; // bioregion random effect
+  // vector[np_bioreg] eps_bioregion_zi; // bioregion random effect
   // distance parameters
   array[n_site] real log_sigma;
   array[n_site] real sigma;
@@ -172,9 +185,13 @@ transformed parameters {
   vector[n_site] lp_site;
   vector[trans] r = inv_logit(logit_trans_p);
   vector[n_site] log_lambda_psi;
+  // vector<lower=0, upper=1>[n_site] zi;
+  vector<lower=0, upper=1>[n_site] zi_cam;
+  // vector<lower=0, upper=1>[n_site] zi_raw;
   // hs betas
   vector[m_psi-1] beta_covs;
   vector[m_psi] beta_psi;
+
   // negbin dispersion
   // real<lower=0> phi[n_site];
   // vector[n_site] logit_psi;
@@ -189,6 +206,10 @@ transformed parameters {
   for(b in 1:np_bioreg) {
     eps_bioregion[b] = bioregion_mu + bioregion_sd * bioregion_raw[b];
   }
+
+  //   for(b in 1:np_bioreg) {
+  //   eps_bioregion_zi[b] = bioregion_mu_zi + bioregion_sd_zi * bioregion_raw_zi[b];
+  // }
 
   // for(k in 1:np_evc) {
   //   eps_evc[k] = evc_mu + evc_sd * evc_raw[k];
@@ -211,8 +232,14 @@ for(n in 1:n_site) {
       log_p_raw[n,i,j] = log(p_raw_scale[n,i,j]);
       }
   }
-// define log lambda
+
+  // zero inflation probability: missing on camera plus base level zi
+  // terms indicate suitability, hence 1 minus
   // eps_site[n] = site_sd * site_raw[n];
+  // zi_raw[n] = (1 - inv_logit( eps_site[n]));
+  // zi[n] = (1 - inv_logit(eps_site[n] + logit_trans_p[start_idx[n]]));
+  zi_cam[n] = (1 - r[start_idx[n]]);
+// define log lambda
   // phi[n] = exp(phi_int + eps_site[n]);
   log_lambda_psi[n] = X_psi[n,] * beta_psi + eps_bioregion[site_bioreg[n]];
 // convert to occupancy psi
@@ -230,21 +257,22 @@ for(n in 1:n_site) {
 // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
 // https://discourse.mc-stan.org/t/royle-and-nichols/14150
 // https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
+// Zero-inflation
 // if (n_survey[n] > 0) {
 //   vector[n_max[n] - any_seen[n] + 1] lp;
 // // seen
 //     if(any_seen[n] == 0){ // not seen
-//       lp[1] = log_sum_exp(log(1-r[start_idx[n]]),
-//                             log1m(1-r[start_idx[n]])
+//       lp[1] = log_sum_exp(log(zi_raw[n]),
+//                             log1m(zi_raw[n])
 //                               + poisson_lpmf(0 | exp(log_lambda_psi[n])));
 //     }
 // // not seen
 // // lp 1 simplification (not necessary)
-//     else lp[1] = log1m(1-r[start_idx[n]]) + poisson_lpmf(1 | exp(log_lambda_psi[n])) +
+//     else lp[1] = log1m(zi_raw[n]) + poisson_lpmf(1 | exp(log_lambda_psi[n])) +
 //     bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
 //      // loop through possible values for maximum count (km2)
 //     for (j in 2:(n_max[n] - any_seen[n] + 1)){
-//       lp[j] = log1m(1-r[start_idx[n]]) + poisson_lpmf(any_seen[n] + j - 1 | exp(log_lambda_psi[n]))
+//       lp[j] = log1m(zi_raw[n]) + poisson_lpmf(any_seen[n] + j - 1 | exp(log_lambda_psi[n]))
 //       + bernoulli_lpmf(y2[start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[n] + j - 1));
 //     }
 //     lp_site[n] = log_sum_exp(lp);
@@ -278,7 +306,8 @@ if (n_survey[n] > 0) {
 model {
   beta_det ~ normal(0, 4); // prior for sigma
   eps_ngs ~ uniform(0, 1); // prior for group size effect
-  beta_psi ~ normal(0, 4); // prior for poisson model
+  beta_psi ~ normal(0, 3); // prior for poisson model
+  // beta_zi ~ normal(0, 3); // prior for poisson model
   beta_trans_det ~ normal(0, 3); // beta for transect detection
   activ ~ beta(bshape, bscale);  //informative prior
   // phi_int ~ normal(0, 0.5);
@@ -287,23 +316,31 @@ model {
   // eta ~ std_normal();
   // rho ~ inv_gamma(51.2298, 13.1468);
   // alpha ~ normal(0, 2);
-  // site_sd ~ normal(0, 0.5);
-  // site_raw ~ normal(0, 0.5);
+  // site_mu ~ normal(0,1);
+  // site_sd ~ normal(0, 1);
+  // site_raw ~ normal(0, 1);
   // evc_mu ~ normal(0,2);
   // evc_sd ~ normal(0, 1);
   // evc_raw ~ normal(0, 1);
+  // bioregion_mu_zi ~ normal(0,1);
+  // bioregion_sd_zi ~ normal(0, 1);
+  // bioregion_raw_zi ~ normal(0,1);
   bioregion_mu ~ normal(0,2);
   bioregion_sd ~ normal(0, 2);
   bioregion_raw ~ normal(0,2);
 
   for(n in 1:n_site) {
   for(j in 1:n_gs) {
-    if(cam_seen[n] == 0) {
-  target += log_sum_exp(log(1-r[start_idx[n]]),
-                            log1m(1-r[start_idx[n]]) + poisson_lpmf(n_obs[n,j] | lambda[n,j]));
-    } else {
-      target += log1m(1-r[start_idx[n]]) + poisson_lpmf(n_obs[n,j] | lambda[n,j]);
-    }
+  if (any_seen[n] == 0 && cam_seen[n] == 0) { // zeros must be from poisson
+      target += poisson_lpmf(n_obs[n,j] | lambda[n,j]);
+  } else if (any_seen[n] == 1 && cam_seen[n] == 0){ // zeros could be camera availability or poisson
+      target += log_sum_exp(log(zi_cam[n]),
+                            log1m(zi_cam[n])
+                              + poisson_lpmf(n_obs[n,j] | lambda[n,j]));
+  } else {
+      target += log1m(zi_cam[n])
+                + poisson_lpmf(n_obs[n,j] | lambda[n,j]); // counts must be from poisson log1m camera det
+  }
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
   target += lp_site[n];
@@ -329,7 +366,7 @@ generated quantities {
   array[n_site, n_gs] real log_lik2;
   array[n_site] real log_lik;
   vector[n_site] Site_lambda;
-  vector[n_site] psi;
+  // vector[n_site] psi;
   array[npc] real pred;
   array[npc] real pred_trunc;
   array[np_reg] real Nhat_reg;
@@ -344,8 +381,8 @@ for(n in 1:n_site) {
   for(j in 1:n_gs) {
   log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
   log_lik2[n,j] = poisson_lpmf(n_obs[n,j] | lambda[n,j]); //for loo
-  n_obs_true[n, j] = gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log(eps_ngs[j]))));
-  n_obs_pred[n,j] = bernoulli_rng(r[start_idx[n]]) * gs[j] * (poisson_rng(exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n]));
+  n_obs_true[n, j] = gs[j] * (poisson_log_rng(log_lambda_psi[n] + log(eps_ngs[j])));
+  n_obs_pred[n,j] = gs[j] * (poisson_log_rng(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j]) + log(survey_area[n])));
     }
     // get loglik on a site level
     log_lik[n] = log_sum_exp(log_sum_exp(log_sum_exp(log_lik1[n,]), log_sum_exp(log_lik2[n,])), lp_site[n]);
@@ -353,7 +390,7 @@ for(n in 1:n_site) {
     N_site[n] = sum(n_obs_true[n,]);
     N_site_pred[n] = sum(n_obs_pred[n,]);
     // Occupancy probability transformation
-    psi[n] = inv_cloglog(log_lambda_psi[n]);
+    // psi[n] = inv_cloglog(log_lambda_psi[n]);
 
   // loop over distance bins
   for(j in 0:max_int_dist) { // get DS predictions for distance 0 to max bin distance
@@ -363,14 +400,14 @@ for(n in 1:n_site) {
 }
 
 for(i in 1:npc) {
-  pred[i] = poisson_rng(exp(X_pred_psi[i,] * beta_psi + eps_bioregion[pred_bioreg[i]])) * prop_pred[i]; //offset
+  pred[i] = poisson_log_rng(X_pred_psi[i,] * beta_psi + eps_bioregion[pred_bioreg[i]]) * prop_pred[i]; //offset
   if(pred[i] > max(N_site)) {
     pred_trunc[i] = max(N_site);
     trunc_counter += 1;
   } else {
     pred_trunc[i] = pred[i];
   } // upper limit placed at highest site estimate
-  Nhat_reg[pred_reg[i]] += pred_trunc[i];
+  Nhat_reg[pred_reg[i]] += pred[i];
 }
 Nhat = sum(pred);
 Nhat_trunc = sum(pred_trunc);
