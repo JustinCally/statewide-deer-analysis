@@ -95,14 +95,14 @@ transect_formula <- ~Survey
 # Complex Formula
 ab_formula <- ~ scale(BIO04) + scale(BIO06) + scale(BIO15) + scale(sqrt(BareSoil)) + scale(NonPhotosyntheticVeg) + scale(sqrt(MRVBF)) + scale(Nitrogen) + scale(sqrt(PastureDistance)) + scale(sqrt(SLOPE)) + scale(TreeDensity) + scale(sqrt(ForestEdge)) + scale(sqrt(SLOPE) * BIO04) + scale(sqrt(ForestEdge) * BIO06) + scale(BIO15 * sqrt(BareSoil)) 
 
-# Simple Formula: Best for 
-ab_formula_2 <- ~ scale(sqrt(BareSoil)) + scale(Nitrogen) + scale(PastureDistance) + scale(TreeDensity) + scale(sqrt(ForestEdge))
+# Simple Formula
+ab_formula_2 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(sqrt(PastureDistance)) + scale(TreeDensity) + scale(sqrt(ForestEdge))
 
-# Simple with Climate: Useful for Sambar Deer 
+# Simple with Coastal Distance
 ab_formula_3 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(sqrt(PastureDistance)) + scale(TreeDensity) + scale(sqrt(ForestEdge)) + scale(dist_coast) 
 
-# Simple Formula With Climate and Coastal 
-ab_formula_4 <- ~ scale(BareSoil) + scale(sqrt(Nitrogen)) + scale(sqrt(PastureDistance)) + scale(TreeDensity) + scale(sqrt(ForestEdge)) + scale(BIO12) + scale(I(BIO12^2)) + scale(dist_coast) 
+# Simple Formula with Climate and Coastal Distance (for hog deer)
+ab_formula_4 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(sqrt(PastureDistance)) + scale(TreeDensity) + scale(sqrt(ForestEdge)) + scale(BIO12) + scale(I(BIO12^2)) + scale(dist_coast) 
 
 det_formula <- ~ scale(HerbaceousUnderstoryCover) # average detection across all sites #scale(HerbaceousUnderstoryCover)
 det_formula2 <- ~1
@@ -126,11 +126,17 @@ for(i in 1:length(deer_species_all)) {
     det_to_use <- det_formula
   }
   
+    if(deer_species_all[i] == "Axis porcinus") {
+    ab_to_use <- ab_formula_3
+  } else {
+    ab_to_use <- ab_formula_2
+  }
+  
 model_data[[i]] <- prepare_model_data(species = deer_species_all[i],
                                  projects = project_short_name,
                      buffer = spatial_buffer,
                      detection_formula = det_to_use,
-                     abundance_formula = ab_formula_3,
+                     abundance_formula = ab_to_use,
                      transect_formula = transect_formula,
                      con = con,
                      raster_dir = raster_files,
@@ -163,6 +169,8 @@ saveRDS(model_data, model_data_file)
 # model_data[[4]]$X_pred_psi <- model_data[[4]]$X_pred_psi[,c(1:6,9)]
 ```
 
+# Model Execution   
+
 ## Model settings  
 
 Below we list the MCMC setting for our model. We run models on eight parallel chains for 600 iterations each (300 warmup and 300 sampling). These setting provide us with 2,400 posterior draws (8 x 300).
@@ -173,8 +181,6 @@ ni <- 750 # sampling iterations
 nw <- 750 # warmup iterations 
 nc <- 8 # number of chains
 ```
-
-# Models  
 
 ## Read in Models  
 
@@ -237,9 +243,9 @@ for(i in 1:length(deer_species_all)) {
 names(model_fits) <-  paste0("fit_poisson_", deer_species_all)
 ```
 
-## Model Evaluation  
+# Model Evaluation  
 
-### LOO (Leave-One-Out Cross-Validation). 
+## LOO (Leave-One-Out Cross-Validation). 
 
 ```{r, eval=FALSE}
 loo_compares <- list()
@@ -275,9 +281,9 @@ loo_table_all <- bind_rows(loo_compare_tables) %>%
     
 ```
 
-### Posterior predictive checks  
+## Posterior predictive checks  
 
-#### Sambar Deer Model. 
+### Sambar Deer Model. 
 
 ```{r ppcSambar, fig.width = 6, fig.height = 6, message = F}
 # q95 <- function(x) quantile(x, 0.95, na.rm = T)
@@ -308,7 +314,7 @@ ppc_sambar[[i]] <- posterior_checks(model = model_fits[[1]],
 cowplot::plot_grid(plotlist = ppc_sambar)
 ```
 
-#### Fallow Deer Model  
+### Fallow Deer Model  
 
 ```{r ppcFallow, fig.width = 6, fig.height = 6, message = F}
 ppc_fallow <- list()
@@ -324,7 +330,7 @@ ppc_fallow[[i]] <- posterior_checks(model = model_fits[[2]],
 cowplot::plot_grid(plotlist = ppc_fallow)
 ```
 
-#### Red Deer Model  
+### Red Deer Model  
 
 ```{r ppcRed, fig.width = 6, fig.height = 6, message = F}
 # funs <- c(prop_zero, mean, max, sd)
@@ -343,7 +349,7 @@ ppc_red[[i]] <- posterior_checks(model = model_fits[[3]],
 cowplot::plot_grid(plotlist = ppc_red)
 ```
 
-#### Hog Deer Model  
+### Hog Deer Model  
 
 ```{r ppcHog, fig.width = 6, fig.height = 6, message = F}
 ppc_hog <- list()
@@ -359,12 +365,11 @@ ppc_hog[[i]] <- posterior_checks(model = model_fits[[4]],
 cowplot::plot_grid(plotlist = ppc_hog)
 ```
 
+# Model Predictions
 
-## Model Predictions
+## Site-based Predictions  
 
-### Site-based Predictions  
-
-#### Site-based Prediction Map
+### Site-based Prediction Map
 
 ```{r SiteMap, fig.height = 24, fig.width = 8}
 vic_regions <- vicmap_query("open-data-platform:delwp_region") %>%
@@ -415,7 +420,7 @@ site_density_plot(red_preds, vic_regions, species = "Red"),
 site_density_plot(hog_preds, vic_regions, species = "Hog"), ncol = 1)
 ```
 
-#### Site-density Summaries 
+### Site-density Summaries 
 ```{r siteSummary, warning = FALSE, message = FALSE}
 density_summary_table <- function(preds, model_data, species) {
   
@@ -449,9 +454,9 @@ density_summary %>%
   collapse_rows(1)
 ```
 
-### Regional and Statewide Abundance
+## Regional and Statewide Abundance
 
-#### Statewide Maps 
+### Statewide Maps 
 
 ```{r PredictionRasters}
 pred_raster_full <- terra::rast(prediction_raster)
@@ -529,7 +534,7 @@ plot_abundance(mean_raster_discrete[[3]], state = state, species = "Red Deer"),
 plot_abundance(mean_raster_discrete[[4]], state = state, species = "Hog Deer", crop = gippsland), ncol = 1)
 ```
 
-#### Regional Abundance Estimates
+### Regional Abundance Estimates
 
 ```{r}
 reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
@@ -567,9 +572,11 @@ abundance_table(model_fits[[3]], regions = reg, pred_area = table(model_data[[3]
 abundance_table(model_fits[[4]], regions = reg, pred_area = table(model_data[[4]]$pred_reg), caption = "Regional estimated of Sambar Deer Density")
 ```
 
-## Detection Process 
+# Model Covariates  
 
-### Distance-sampling. 
+## Detection Processes 
+
+### Distance-sampling 
 
 ```{r AverageDetectionRates}
 species_names <- c("Sambar Deer", "Fallow Deer", "Red Deer", "Hog Deer")
@@ -596,7 +603,6 @@ av_det_rates %>%
   kable_styling("striped") %>%
   collapse_rows(1)
 ```
-
 
 ```{r DistancePlots}
 site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
@@ -670,7 +676,6 @@ detection_plot_HN
 
 ### Transect-surveys  
 
-
 ```{r detectionplots, fig.width=5, fig.height=7, fig.cap="Detection Probability for the various methods of survey. Camera trap detection probability is based on average deployment length, while transects are based on 3 independent transect searches"}
 all_draws <- model_fits[[1]]$draws("beta_trans_det", format = "df")
 
@@ -742,4 +747,88 @@ det_plot[[i]] <- marginal_effects_plot_cmd(plot_data,
 cowplot::plot_grid(plotlist = det_plot, ncol = 1)
 ```
 
+## Abundance Processes 
+
+### Bioregion  
+
+We used a spatially-derived random-effect of the bioregion of the sampled site. This random-effect allows us the ability to make predictions that include the variance associated with this random effect. This random-effect also minimises predictions in areas without deer detections (e.g. the mallee). 
+
+```{r bioregions, fig.height=24, fig.width = 5}
+bioregion_contribution <- function(model, data, species) {
+  eps_bioregion <- model$draws("eps_bioregion", format = "matrix")
+  bioregion_data <- data[["bioreg_sf"]]
+  colnames(eps_bioregion) <- bioregion_data$bioregion
+  
+  plot <- mcmc_areas(eps_bioregion, prob_outer = 0.9) +
+    ggtitle(species)
+  
+  return(plot)
+}
+
+bio_plot_data <- list()
+
+for(i in 1:length(species_names)) {
+ bio_plot_data[[i]] <- bioregion_contribution(model = model_fits[[i]], 
+                         data = model_data[[i]], 
+                         species = species_names[i])
+} 
+
+cowplot::plot_grid(plotlist = bio_plot_data, ncol = 1)
+```
+
+### Fixed-parameter Effects  
+
+```{r FixedEffects, fig.height=10, fig.width = 14, warning = FALSE, message = FALSE}
+ab_joined_list <- list()
+for(j in 1:length(species_names)) {
+beta_draws <- model_fits[[j]]$draws("beta_psi", format = "df")
+
+ab_marginal_effects <- list()
+ab_plot <- list()
+
+    if(deer_species_all[j] == "Axis porcinus") {
+    ab_to_use <- ab_formula_3
+  } else {
+    ab_to_use <- ab_formula_2
+  }
+
+phi_vars <- unlist(stringr::str_remove_all(string = labels(terms(ab_to_use)), pattern =  "log|scale|sqrt|\\)|\\("))
+phi_logs <- unlist(stringr::str_detect(string = labels(terms(ab_to_use)), pattern =  "log\\("))
+phi_sqrts <- c(0.5,0.5,0.5,1,0.5,1)
+
+phi_labs <- c("Bare Soil (%)", 
+              "Nitrogen (%)", 
+              "Distance to Pastural Land (m)", 
+              "Tree Density (%)", 
+              'Length of forest edge in 1km2 (m)', 
+              "Geographical Distance to coastline")
+
+fac <- c(FALSE, FALSE, FALSE, FALSE, FALSE, FALSE)
+
+for(i in 1:length(phi_vars)) {
+ab_marginal_effects[[i]] <- marginal_effects_cmd(beta_draws, 
+                                              param = "beta_psi", 
+                                              param_number = i+1, log = phi_logs[i],
+                                     model_data = model_data[[j]][["raw_data"]], 
+                                     abundance = TRUE,
+                                     pwr = phi_sqrts[i],
+                                     model_column = phi_vars[i], 
+                                     transition = FALSE) %>%
+  mutate(species = species_names[j])
+
+}
+ab_joined_list[[j]] <- bind_rows(ab_marginal_effects)
+}
+
+all_me_data <- bind_rows(ab_joined_list) 
+  
+
+marginal_effects_plot_cmd_all(all_me_data, 
+                          col = "DarkGreen", 
+                          factor = FALSE,
+                          ylab = "Contribution to Abundance (log-scale)") +
+      ggplot2::facet_grid(species~param, scales = "free") +
+  theme_bw() +
+  xlab("Covariate Value")
+```
 
