@@ -174,7 +174,7 @@ for(n in 1:n_site) {
 model {
   beta_det ~ normal(0, 4); // prior for sigma
   eps_ngs ~ uniform(0, 1); // prior for group size effect
-  beta_psi ~ normal(0, 3); // prior for poisson model
+  beta_intercept ~ normal(-2, 5); // prior for intercept in poisson model
   activ ~ beta(bshape, bscale);  //informative prior
   bioregion_mu ~ normal(0,2);
   bioregion_sd ~ normal(0, 2);
@@ -242,6 +242,8 @@ for(n in 1:n_site) {
 }
   av_gs = sum(gs .* eps_ngs);
 
+for(i in 1:np_reg) Nhat_reg[i] = 0;
+
 for(i in 1:npc) {
   pred[i] = poisson_log_rng(X_pred_psi[i,] * beta_psi + eps_bioregion[pred_bioreg[i]]) * prop_pred[i] * av_gs; //offset
   if(pred[i] > max(N_site)) {
@@ -250,7 +252,7 @@ for(i in 1:npc) {
   } else {
     pred_trunc[i] = pred[i];
   } // upper limit placed at highest site estimate
-  Nhat_reg[pred_reg[i]] = Nhat_reg[pred_reg[i]] + pred[i];
+  Nhat_reg[pred_reg[i]] += pred[i];
 }
 Nhat = sum(pred);
 Nhat_trunc = sum(pred_trunc);

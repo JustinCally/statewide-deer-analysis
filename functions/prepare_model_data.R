@@ -201,7 +201,7 @@ prepare_model_data <- function(species,
   # picker <-  function(x, viable_numbers) {
   #   min(viable_numbers[viable_numbers >= x])
   # }
-  evc_groups <- readRDS("data/evc_groups.rds")
+  # evc_groups <- readRDS("data/evc_groups.rds")
 
   # evc_pred <- vic_model_data_resampled_df %>%
   #   pull(EVC) %>%
@@ -467,9 +467,9 @@ prepare_model_data <- function(species,
               site_reg = site_reg,
               pred_reg = pred_reg,
               np_reg = length(unique(site_reg)),
-              np_evc = evc_groups$np_evc,
-              site_evc = evc_groups$site_evc,
-              pred_evc = evc_groups$pred_evc,
+              # np_evc = evc_groups$np_evc,
+              # site_evc = evc_groups$site_evc,
+              # pred_evc = evc_groups$pred_evc,
               hs_df = hs_df,
               hs_df_global = hs_df_global,
               hs_scale_global = hs_scale_global, # ratio of expected non-zero to zero divided by total observation as per brms convention
@@ -478,6 +478,7 @@ prepare_model_data <- function(species,
   if(evaltransects) {
   data_trans <- list(trans = nrow(transects),
                      y2 = transects$Presence,
+                     transects = transects,
                      start_idx = start_idx,
                      end_idx = end_idx,
                      trans_det_ncb = ncol(transect_mm),

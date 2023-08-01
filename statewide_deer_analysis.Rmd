@@ -31,6 +31,10 @@ library(loo)
 library(gt)
 library(terra)
 library(caret)
+library(tidyterra)
+library(tidyr)
+library(VicmapR)
+library(kableExtra)
 check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
 options(mc.cores=6)
 
@@ -163,11 +167,10 @@ saveRDS(model_data, model_data_file)
 
 Below we list the MCMC setting for our model. We run models on eight parallel chains for 600 iterations each (300 warmup and 300 sampling). These setting provide us with 2,400 posterior draws (8 x 300).
 
-
 ```{r ModelSettings}
 # STAN settings
-ni <- 250 # sampling iterations
-nw <- 250 # warmup iterations 
+ni <- 750 # sampling iterations
+nw <- 750 # warmup iterations 
 nc <- 8 # number of chains
 ```
 
@@ -177,6 +180,7 @@ nc <- 8 # number of chains
 
 ```{r models, echo = FALSE, warning=FALSE}
 model_poisson <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_hs.stan"))
+model_poisson_co <- cmdstan_model(here::here("stan", "count_only_poisson_hs.stan"))
 ```
 
 ## Fit models  
@@ -184,6 +188,7 @@ model_poisson <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_hs.s
 We can fit models using `cmdstanr`. Here we fit five models using a poisson distribution. One model for each of the four deer species as well as a model for 'all/any deer species'. 
 
 ```{r FitModels, eval = FALSE}
+integrated_model <- c(TRUE, TRUE, TRUE, FALSE)
 distributions <- c("poisson")
 model_fits <- list()
 
@@ -191,7 +196,7 @@ for(j in 1:length(distributions)) {
 
   for(i in 1:length(deer_species_all)) {
 
-  if(evaluate_transects[i]) {
+  if(integrated_model[i]) {
     model_to_fit <- get(paste0("model_", distributions[j]))
   } else {
     model_to_fit <- get(paste0("model_", distributions[j], "_co"))
@@ -272,49 +277,35 @@ loo_table_all <- bind_rows(loo_compare_tables) %>%
 
 ### Posterior predictive checks  
 
-#### All Deer Model. 
+#### Sambar Deer Model. 
 
-```{r ppcAll, fig.width = 6, fig.height = 6, message = F}
-q90 <- function(x) quantile(x, 0.98, na.rm = T)
-sd_90 <- function (x, na.rm = FALSE) {
-  quants <- quantile(x, c(0.05, 0.95), na.rm = T)
-  x <- x[x < quants[2] & x > quants[1]]
-  sqrt(var(if (is.vector(x) || is.factor(x)) x else as.double(x), 
-    na.rm = na.rm))
-}
-funs <- c(prop_zero, mean, q90, sd)
-titles <- c("Proportion zeros", "Mean", "99% Percentile", "SD (5% - 95%)")
+```{r ppcSambar, fig.width = 6, fig.height = 6, message = F}
+# q95 <- function(x) quantile(x, 0.95, na.rm = T)
+# q25 <- function(x) quantile(x, 0.25, na.rm = T)
+# q75 <- function(x) quantile(x, 0.75, na.rm = T)
+# sd_90 <- function (x, na.rm = FALSE) {
+#   quants <- quantile(x, c(0.0, 0.95), na.rm = T)
+#   x <- x[x < quants[2] & x > quants[1]]
+#   sqrt(var(if (is.vector(x) || is.factor(x)) x else as.double(x),
+#     na.rm = na.rm))
+# }
 
-ppc_all <- list()
+funs <- c(prop_zero, mean, sd, ppc_scatter_avg)
+titles <- c("Proportion Zeros", "Mean", "SD", "Average Site Counts")
+
+ppc_sambar <- list()
+
+# funs <- c(prop_zero, mean, q90, sd)
 
 for(i in 1:length(funs)) {
-ppc_all[[i]] <- posterior_checks(model = model_fits[["fit_poisson_All deer"]], 
-                 model_data = model_data$`All deer`, 
+ppc_sambar[[i]] <- posterior_checks(model = model_fits[[1]], 
+                 model_data = model_data$`Cervus unicolor`, 
                  stat = funs[[i]], 
                  integrated = T,
                  title = titles[i])
 }
 
-cowplot::plot_grid(plotlist = ppc_all)
-```
-
-#### Sambar Deer Model. 
-
-```{r ppcSambar, fig.width = 6, fig.height = 6, message = F}
-ppc_sambar <- list()
-
-funs <- c(prop_zero, mean, q95, sd)
-
-for(i in 1:length(funs)) {
-ppc_sambar[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Cervus unicolor"]], 
-                 model_data = model_data$`Cervus unicolor`, 
-                 stat = funs[[i]], 
-                 integrated = T, 
-                 title = titles[i])
-}
-
 cowplot::plot_grid(plotlist = ppc_sambar)
-
 ```
 
 #### Fallow Deer Model  
@@ -323,7 +314,7 @@ cowplot::plot_grid(plotlist = ppc_sambar)
 ppc_fallow <- list()
 
 for(i in 1:length(funs)) {
-ppc_fallow[[i]] <- posterior_checks(model = fallow_hu, 
+ppc_fallow[[i]] <- posterior_checks(model = model_fits[[2]], 
                  model_data = model_data$`Dama dama`, 
                  stat = funs[[i]], 
                  integrated = T, only_det = F,
@@ -336,13 +327,13 @@ cowplot::plot_grid(plotlist = ppc_fallow)
 #### Red Deer Model  
 
 ```{r ppcRed, fig.width = 6, fig.height = 6, message = F}
-funs <- c(prop_zero, mean, max, sd)
-titles <- c("Proportion zeros", "Mean", "Maximum", "SD")
+# funs <- c(prop_zero, mean, max, sd)
+# titles <- c("Proportion zeros", "Mean", "Maximum", "SD")
 
 ppc_red <- list()
 
 for(i in 1:length(funs)) {
-ppc_red[[i]] <- posterior_checks(model = model_fits[[4]], 
+ppc_red[[i]] <- posterior_checks(model = model_fits[[3]], 
                  model_data = model_data$`Cervus elaphus`, 
                  stat = funs[[i]], 
                  integrated = T, only_det = F,
@@ -355,13 +346,10 @@ cowplot::plot_grid(plotlist = ppc_red)
 #### Hog Deer Model  
 
 ```{r ppcHog, fig.width = 6, fig.height = 6, message = F}
-funs <- c(prop_zero, mean, q95, sd_90)
-titles <- c("Proportion zeros", "Mean", "95% Percentile", "SD (5% - 95%)")
-
 ppc_hog <- list()
 
 for(i in 1:length(funs)) {
-ppc_hog[[i]] <- posterior_checks(model = model_fits[["fit_poisson_Axis porcinus"]], 
+ppc_hog[[i]] <- posterior_checks(model = model_fits[[4]], 
                  model_data = model_data$`Axis porcinus`, 
                  stat = funs[[i]], 
                  integrated = F, only_det = F,
@@ -374,15 +362,107 @@ cowplot::plot_grid(plotlist = ppc_hog)
 
 ## Model Predictions
 
+### Site-based Predictions  
+
+#### Site-based Prediction Map
+
+```{r SiteMap, fig.height = 24, fig.width = 8}
+vic_regions <- vicmap_query("open-data-platform:delwp_region") %>%
+  collect() %>%
+  st_transform(3111) %>%
+  st_simplify(dTolerance = 500)
+
+
+site_preds <- function(model, cams_curated) {
+  rn_dens <- model$summary("N_site")
+  density_at_sites_rn <- cbind(cams_curated, rn_dens)
+  
+  return(density_at_sites_rn)
+}
+
+site_density_plot <- function(densities, regions, species) {
+  densities$density <- cut(densities$mean,
+                                   breaks = c(0, 0.1, 1, 3, 5, 10, max(densities$mean)),
+                                   labels = c("<0.1", "0.1 - 1", "1-3", "3 - 5", "5 - 10", "10+"), include.lowest = T, right = T)
+  
+  if(species == "Hog") {
+    regions <- regions %>% filter(delwp_region == "GIPPSLAND")
+    densities <- densities %>% st_filter(regions %>% st_transform(4283))
+  }
+  
+plot <- ggplot2::ggplot(data = densities) +
+  ggplot2::geom_sf(data = regions, alpha = 0.75, fill = "grey80") +
+  ggplot2::geom_sf(aes(fill = density, alpha = mean), shape = 21, size = 4) +
+  scale_fill_viridis_d(name = "", guide = guide_legend(override.aes = list(size = 6))) +
+  scale_alpha_continuous(range = c(0.5,1), guide = "none") +
+  labs(title = paste0('Density of ',species ,' Deer'), fill = bquote('Deer per'~km^2)) +
+  theme_bw() +
+  theme(legend.text = element_text(size = 18), legend.key.size = unit(1, "cm"),
+        title = element_text(size = 22))
+  
+return(plot)
+  
+}
+
+sambar_preds <- site_preds(model_fits[[1]], cams_curated = cams_curated)
+fallow_preds <- site_preds(model_fits[[2]], cams_curated = cams_curated)
+red_preds <- site_preds(model_fits[[3]], cams_curated = cams_curated)
+hog_preds <- site_preds(model_fits[[4]], cams_curated = cams_curated)
+
+cowplot::plot_grid(site_density_plot(sambar_preds, vic_regions, species = "Sambar"),
+site_density_plot(fallow_preds, vic_regions, species = "Fallow"),
+site_density_plot(red_preds, vic_regions, species = "Red"),
+site_density_plot(hog_preds, vic_regions, species = "Hog"), ncol = 1)
+```
+
+#### Site-density Summaries 
+```{r siteSummary, warning = FALSE, message = FALSE}
+density_summary_table <- function(preds, model_data, species) {
+  
+  cam_seen <- as.integer(as.logical(rowSums(model_data$n_obs)))
+  
+  preds_sum <- preds %>% 
+    st_drop_geometry() %>%
+    mutate(`Species` = species,
+           `CameraDetection` = cam_seen, 
+           `AnyDetection` = model_data$any_seen, 
+           `Detection` = case_when(CameraDetection == 0 & AnyDetection == 0 ~ "Not seen", 
+                                   CameraDetection == 0 & AnyDetection == 1 ~ "Only detected on transects", 
+                                   CameraDetection == 1 & AnyDetection == 1 ~ "Seen on cameras")) %>%
+    group_by(`Species`, `Detection`) %>%
+    summarise(`Number of Sites` = n(),
+              `Average Density` = mean(mean)) %>%
+    ungroup()
+  
+  return(preds_sum)
+}
+
+density_summary <- bind_rows(
+  density_summary_table(sambar_preds, model_data[[1]], species = "Sambar"),
+  density_summary_table(fallow_preds, model_data[[2]], species = "Fallow"),
+  density_summary_table(red_preds, model_data[[3]], species = "Red"),
+  density_summary_table(hog_preds, model_data[[4]], species = "Hog"))
+
+density_summary %>%
+  kbl(format = "html", digits = 2) %>%
+  kable_styling("striped") %>%
+  collapse_rows(1)
+```
+
+### Regional and Statewide Abundance
+
+#### Statewide Maps 
+
 ```{r PredictionRasters}
 pred_raster_full <- terra::rast(prediction_raster)
 
 pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
-  stringr::str_remove_all(labels(terms(ab_formula_2)),
+  stringr::str_remove_all(labels(terms(ab_formula_3)),
                           "scale[(]|[)]|sqrt[(]"), 
   pattern = "[*]", negate = T)]], mean)
 
 mean_raster <- list()
+mean_raster_discrete <- list()
 
 for(i in 1:length(model_fits)) {
 
@@ -395,8 +475,271 @@ terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds
                                                                         trim = 0)
 
 mean_raster[[i]] <- pred_raster
+mean_raster_discrete[[i]] <- mean_raster[[i]]
+max_pred <- max(values(mean_raster[[i]]), na.rm = T)
 
-# pred_raster_evc <- pred_raster
-# values(pred_raster_evc)[!is.na(terra::values(pred_raster_evc))]  <- model_data$`Dama dama`$pred_bioreg
+values(mean_raster_discrete[[i]]) <- cut(values(mean_raster_discrete[[i]]) , 
+                                         breaks = c(0, 0.1,1,3,5,10,20, max_pred), 
+                                         include.lowest = T, right = T,
+                                         labels = c("0 - 0.1", 
+                                                    "0.1 - 1", 
+                                                    "1 - 3", 
+                                                    "3 - 5",
+                                                    "5 - 10", 
+                                                    "10 - 20", 
+                                                    paste0("20 - ", ceiling(max_pred))))
 }
 ```
+
+```{r PlotSave, fig.height=24, fig.width=8}
+# reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
+#     VicmapR::collect() %>%
+#   sf::st_transform(3111) %>%
+#   sf::st_simplify(dTolerance = 250) 
+state <- VicmapR::vicmap_query("open-data-platform:vmlite_victoria_polygon_su5") %>%
+  filter(state != "NSW" & state != "SA" & feature_type_code != "sea") %>%
+  VicmapR::collect() %>%
+  sf::st_transform(3111)
+
+gippsland <- vic_regions %>% filter(delwp_region == "GIPPSLAND")
+
+
+plot_abundance <- function(raster, state, species, crop = NULL) {
+  
+  if(!is.null(crop)) {
+    raster <- terra::crop(raster, vect(crop), mask = T)
+    state <- crop
+  }
+  
+  plot <- ggplot2::ggplot() +
+    ggplot2::geom_sf(data = state, alpha = 0.5, linewidth = 0.5, fill = "grey80") + 
+    tidyterra::geom_spatraster(data = raster, na.rm = T) + 
+    tidyterra::scale_fill_terrain_d(na.translate = FALSE) + 
+    ggplot2::labs(fill = bquote('Deer per'~km^2), title = paste0("Average Density of ", species, " on Victorian Public Land")) + 
+    ggspatial::annotation_scale() 
+  
+  return(plot)
+  
+}
+
+cowplot::plot_grid(
+plot_abundance(mean_raster_discrete[[1]], state = state, species = "Sambar Deer"),
+plot_abundance(mean_raster_discrete[[2]], state = state, species = "Fallow Deer"),
+plot_abundance(mean_raster_discrete[[3]], state = state, species = "Red Deer"),
+plot_abundance(mean_raster_discrete[[4]], state = state, species = "Hog Deer", crop = gippsland), ncol = 1)
+```
+
+#### Regional Abundance Estimates
+
+```{r}
+reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
+    VicmapR::collect() %>%
+    dplyr::group_by(delwp_region) %>%
+    dplyr::summarise(geometry = sf::st_combine(geometry)) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(delwp_region_fact = as.integer(factor(delwp_region))) 
+
+abundance_table <- function(model, regions, pred_area, caption) {
+  regional_abundance <- model$summary("Nhat_reg") %>%
+    dplyr::bind_rows(model$summary("Nhat")) %>% 
+    dplyr::mutate(variable = c(regions$delwp_region, "TOTAL"), 
+                  `Area km2` = c(pred_area, sum(pred_area)), 
+                  `Average Density (per km2)` = round(mean/`Area km2`, 2)) %>% 
+    dplyr::select(Region = variable, 
+                  Mean = mean, 
+                  Median = median, 
+                  SD = sd, 
+                  `5 %` = q5, 
+                  `90 %` = q95, 
+                  `Area km2`,
+                  `Average Density (per km2)`)
+  
+  kableExtra::kbl(regional_abundance, digits = 1, format = "html", caption = caption) %>%
+    kableExtra::kable_styling("striped") %>%
+    kableExtra::column_spec(1, bold = TRUE) %>%
+    kableExtra::row_spec(6, hline_after = T) %>%
+    kableExtra::row_spec(7, background = "#c2a5cf", color = "black", bold = T, hline_after = T)
+}
+
+abundance_table(model_fits[[1]], regions = reg, pred_area = table(model_data[[1]]$pred_reg), caption = "Regional estimated of Sambar Deer Density")
+abundance_table(model_fits[[2]], regions = reg, pred_area = table(model_data[[2]]$pred_reg), caption = "Regional estimated of Sambar Deer Density")
+abundance_table(model_fits[[3]], regions = reg, pred_area = table(model_data[[3]]$pred_reg), caption = "Regional estimated of Sambar Deer Density")
+abundance_table(model_fits[[4]], regions = reg, pred_area = table(model_data[[4]]$pred_reg), caption = "Regional estimated of Sambar Deer Density")
+```
+
+## Detection Process 
+
+### Distance-sampling. 
+
+```{r AverageDetectionRates}
+species_names <- c("Sambar Deer", "Fallow Deer", "Red Deer", "Hog Deer")
+av_det_rates <- list()
+for(i in 1:length(model_fits)) {
+det_rates <- model_fits[[i]]$summary("p") %>%
+  mutate(var = stringr::str_extract(variable, "(?<=\\[).+?(?=\\])")) %>%
+  separate(var, into = c("site", "Group Size"), sep = ",")
+
+av_det_rates[[i]] <- det_rates %>%
+  group_by(`Group Size`) %>%
+  summarise(mean = mean(mean)) %>%
+  ungroup() %>% 
+  transmute(`Group Size`, 
+            Species = species_names[i], 
+            `Average Site Detection Probability` = mean)
+
+}
+
+av_det_rates %>%
+  bind_rows() %>%
+  arrange(`Group Size`) %>%
+  kbl("html", digits = 3) %>%
+  kable_styling("striped") %>%
+  collapse_rows(1)
+```
+
+
+```{r DistancePlots}
+site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
+    dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(HerbaceousUnderstoryCover = NNWHUCover + ENWHUCover,
+           SiteID = dplyr::case_when(SiteID == "47191" & CameraID == "HO04101053" ~ "47191A",
+                              SiteID == "47191" & CameraID != "HO04101053" ~ "47191B",
+                              TRUE ~ SiteID)) %>% # native + exotic herbaceous cover
+    dplyr::arrange(SiteID) %>%
+    as.data.frame()
+
+  n_distance_bins <- 5
+  delta <- 2.5
+  midpts <- c(1.25, 3.75, 6.25, 8.75, 11.25)
+  max_distance <- 12.5
+
+det_curve <- model_fits[[1]]$draws("DetCurve", format = "draws_matrix") %>%
+  as.data.frame() %>%
+  head(250) %>%
+  pivot_longer(cols = everything())
+
+det_curve_wr <- det_curve %>%
+  mutate(var = stringr::str_extract(name, "(?<=\\[).+?(?=\\])")) %>%
+  separate(var, into = c("s", "Distance"), sep = ",")
+
+det_vars_pred <- site_vars %>%
+  mutate(s = as.character(1:nrow(.)),
+         herbaceouslvl = cut(HerbaceousUnderstoryCover,
+                             breaks = c(0, 25, 50, 75, 105), 
+                             labels = c("0 - 25%", 
+                                        "25 - 50%", 
+                                        "50 - 75%", 
+                                        "75 - 100%"),
+                             include.lowest = T, right = FALSE))
+
+det_curve_sum <- det_curve_wr %>%
+  mutate(Distance = as.numeric(Distance)-1) %>%
+  left_join(det_vars_pred) %>%
+  group_by(herbaceouslvl, Distance) %>%
+  summarise(median = quantile(value, 0.5),
+            q5 = quantile(value, 0.05),
+            q95 = quantile(value, 0.95))
+
+
+y_combined <- colSums(model_data[[1]]$y[,,1]) %>% # just for group size 1
+  as.data.frame() %>%
+  `colnames<-`("Count") %>%
+  mutate(Distance = midpts,
+         Prop = Count/(max(Count)),
+         CountS = Count/(2 * 2.5 * Distance)/max_distance^2,
+         PropS = CountS/(max(CountS)))
+
+detection_plot_HN <- ggplot(aes(x = Distance), data = det_curve_sum) +
+  geom_col(aes(y = PropS), fill = "grey70", colour = "grey20", width = 2.5, data = y_combined, alpha = 0.7) +
+  # geom_errorbar(aes(ymin = PropSq5, ymax = PropSq95),  data = y_combined) +
+  # geom_line(aes(y = HNS)) +
+  geom_ribbon(aes(ymin = q5, ymax = q95, fill = herbaceouslvl), alpha = 0.5) +
+  geom_line(aes(y = median, colour = herbaceouslvl)) +
+  ggtitle("Detection rates of Sambar deer at varying distances from the camera") +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0,1)) +
+  scale_fill_brewer(palette = "Set1") +
+  scale_colour_brewer(palette = "Set1") +
+  ylab("Detection probability (p)") +
+  labs(fill = "Herbaceous\nUnderstorey\nCover", colour = "Herbaceous\nUnderstorey\nCover") +
+  theme_classic()
+
+detection_plot_HN
+```
+
+### Transect-surveys  
+
+
+```{r detectionplots, fig.width=5, fig.height=7, fig.cap="Detection Probability for the various methods of survey. Camera trap detection probability is based on average deployment length, while transects are based on 3 independent transect searches"}
+all_draws <- model_fits[[1]]$draws("beta_trans_det", format = "df")
+
+det_marginal_effects <- list()
+det_plot <- list()
+
+obs_vars <- unlist(stringr::str_remove_all(string = labels(terms(transect_formula)), pattern =  "log|scale|\\)|\\("))
+obs_cols <- unlist(stringr::str_remove_all(string = colnames(model_data[[1]]$trans_pred_matrix), pattern =  "log|scale|\\)|\\("))
+obs_logs <- unlist(stringr::str_detect(string = colnames(model_data[[1]]$trans_pred_matrix), pattern =  "log\\("))
+
+obs_labs <- c("Survey Method")
+
+fac <- c(TRUE, TRUE, TRUE, TRUE, TRUE)
+fac2 <- c(TRUE)
+
+det_obs <- transects %>% 
+  mutate(Survey = factor(Survey))
+
+params_w_levs <- levels(det_obs$Survey)
+
+for(i in 1:(length(obs_cols))) {
+det_marginal_effects[[i]] <- marginal_effects_cmd(all_draws, 
+                                              param = "beta_trans_det", 
+                                              param_number = i, log = obs_logs[i],
+                                     model_data = det_obs, 
+                                     model_column = obs_vars[c(1,attr(model_data[[1]]$trans_pred_matrix, "assign")[-1])[i]], 
+                                     transition = FALSE) %>%
+  mutate(group = param, 
+         param = params_w_levs[i], 
+         factor = fac[i], 
+         variable = as.numeric(variable))
+
+if(fac[i]) {
+  det_marginal_effects[[i]] <- det_marginal_effects[[i]]
+}
+
+}
+
+marginal_prob <- function(x, pwr = 3) {
+  xm <- 1-x
+  return(1-(xm^pwr))
+}
+
+det_marginal_effects_bind <- bind_rows(det_marginal_effects) %>%
+  rowwise() %>%
+  mutate(value = case_when(param != "Camera" ~ marginal_prob(value), 
+                           TRUE ~ value))
+
+det_marginal_effects_split <- split(det_marginal_effects_bind, det_marginal_effects_bind$group)
+
+for(i in 1:length(det_marginal_effects_split)) {
+  
+  if(fac2[i]) {
+    plot_data <- det_marginal_effects_split[[i]] %>% 
+      mutate(variable = param, 
+             param = group)
+  } else {
+    plot_data <- det_marginal_effects_split[[i]]
+  }
+
+det_plot[[i]] <- marginal_effects_plot_cmd(plot_data, 
+                                            col = "DarkGreen", factor = fac2[i],
+                                           ylab = "Detection probability") +
+  xlab(obs_labs[i]) +
+  scale_y_continuous(limits = c(0,.9))
+
+}
+
+cowplot::plot_grid(plotlist = det_plot, ncol = 1)
+```
+
+

@@ -3,6 +3,7 @@
 # Check number of obs pred (site by group)
 # prop zero
 prop_zero<- function(x) mean(x == 0, na.rm = T)
+prop_low <- function(x, bound = 10) mean(x < bound, na.rm = T)
 
 #' Run posterior checks for CTDS distance sampling models
 #'
@@ -31,17 +32,32 @@ posterior_checks <- function(model, model_data, stat, title, integrated = F, onl
 
   model_draws <- model$draws("N_site_pred", format = "matrix")
 
-  qmin <- min(quantile(apply(model_draws, 1, stat, simplify = T), 0.005, na.rm = T), do.call(stat, args = list(x = n_obs_totals[which_inc])))
-  qmax <- max(quantile(apply(model_draws, 1, stat, simplify = T), 0.995, na.rm = T), do.call(stat, args = list(x = n_obs_totals[which_inc])))
-
+  if(identical(stat, ppc_scatter_avg)) {
+    ppc_plots <- bayesplot::ppc_scatter_avg(n_obs_totals[which_inc],
+                                     model_draws[,which_inc],
+                                     ...) +
+      ggplot2::ggtitle(label = title) +
+      ggplot2::scale_x_continuous(trans = "sqrt") +
+      ggplot2::scale_y_continuous(trans = "sqrt") +
+      ggplot2::theme_bw() +
+      ggplot2::theme(legend.position = "top")
+  } else if(identical(stat, ppc_rootogram)) {
+    ppc_plots <- bayesplot::ppc_rootogram(y = n_obs_totals[which_inc],
+                                          yrep = round(model_draws[,which_inc]),
+                                            ...) +
+      ggplot2::ggtitle(label = title) +
+      ggplot2::theme_bw() +
+      ggplot2::theme(legend.position = "top")
+  } else {
     ppc_plots <- bayesplot::ppc_stat(n_obs_totals[which_inc],
                                      model_draws[,which_inc],
                                      stat=stat,
                                      ...) +
       ggplot2::ggtitle(label = title) +
-      ggplot2::scale_x_continuous(limits = c(qmin, qmax)) +
+      # ggplot2::scale_x_continuous(limits = c(qmin, qmax)) +
       ggplot2::theme_bw() +
       ggplot2::theme(legend.position = "top")
+  }
 
-    ppc_plots
+    return(ppc_plots)
 }
