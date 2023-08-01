@@ -151,12 +151,20 @@ model_data[[i]] <- prepare_model_data(species = deer_species_all[i],
                      hs_scale_slab = 1,
                      hs_df_slab = 4)
 
+# not used in model but for plots later
+model_data[[i]]$raw_data[is.na(model_data[[i]]$raw_data)] <- 0
+model_data[[i]]$transects[is.na(model_data[[i]]$transects)] <- 0
+
 }
 names(model_data) <- deer_species_all
 saveRDS(model_data, model_data_file)
 } else {
   model_data <- readRDS(model_data_file)
 }
+
+# for(i in 1:4) {
+# model_data[[i]]$transects[is.na(model_data[[i]]$transects)] <- 0
+# }
 
 # for(i in 1:3) {
 # model_data[[i]]$m_psi <- 6
