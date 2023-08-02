@@ -3,7 +3,7 @@
 # Check number of obs pred (site by group)
 # prop zero
 prop_zero<- function(x) mean(x == 0, na.rm = T)
-prop_low <- function(x, bound = 10) mean(x < bound, na.rm = T)
+prop_low <- function(x, bound = 20) mean(x < bound, na.rm = T)
 
 #' Run posterior checks for CTDS distance sampling models
 #'

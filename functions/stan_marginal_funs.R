@@ -99,11 +99,12 @@ marginal_effects_plot_cmd_all <- function(data, col, factor = FALSE, trans = "id
 
   if(factor) {
     plot <- data %>%
-      ggplot2::ggplot(aes(x = variable, y = value)) +
-      ggplot2::geom_violin(draw_quantiles = c(0.05, 0.5, 0.95), fill = col, alpha = 0.5) +
+      ggplot2::ggplot(aes(x = variable, y = value, fill = species)) +
+      ggplot2::geom_violin(draw_quantiles = c(0.05, 0.5, 0.95),
+                           alpha = 0.5, scale = "width", trim = TRUE,
+                           position=position_dodge(width=0.5)) +
       ggplot2::ylab(ylab) +
       # ylim(c(0,47)) +
-      ggplot2::theme_classic() +
       ggplot2::theme(axis.title.y = ggtext::element_markdown())
   } else{
 

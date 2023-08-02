@@ -1,25 +1,3 @@
-functions {
-
-  /* Efficient computation of the horseshoe prior
-   * Args:
-   *   zb: standardized population-level coefficients
-   *   global: global horseshoe parameters
-   *   local: local horseshoe parameters
-   *   scale_global: global scale of the horseshoe prior
-   *   c2: positive real number for regularization
-   * Returns:
-   *   population-level coefficients following the horseshoe prior
-   */
-  vector horseshoe(vector zb, vector[] local, real[] global,
-                   real scale_global, real c2) {
-    int K = rows(zb);
-    vector[K] lambda = local[1] .* sqrt(local[2]);
-    vector[K] lambda2 = square(lambda);
-    real tau = global[1] * sqrt(global[2]) * scale_global;
-    vector[K] lambda_tilde = sqrt(c2 * lambda2 ./ (c2 + tau^2 * lambda2));
-    return zb .* lambda_tilde * tau;
-  }
-}
 data {
   int<lower=0> N;                      // number of observations
   real delta;                          // bin width
@@ -55,12 +33,6 @@ data {
   matrix[n_site, m_psi] X_psi;
   // negbinom scale
   // real reciprocal_phi_scale;
-  // hs params
-  real<lower=0> hs_df; // horseshoe prior param
-  real<lower=0> hs_df_global;
-  real<lower=0> hs_df_slab;
-  real<lower=0> hs_scale_global;
-  real<lower=0> hs_scale_slab;
 
   //transect level information
   int<lower=1> trans;                  // total number of transects across all sites for all methods
@@ -99,7 +71,7 @@ transformed data {
 parameters {
  // abundance parameters
   simplex[n_gs] eps_ngs; // random variation in group size
-  vector[1] beta_intercept;
+  vector[m_psi] beta_psi;
   vector[det_ncb] beta_det;
   // transect detection parameters
   vector[trans_det_ncb] beta_trans_det;
@@ -108,12 +80,6 @@ parameters {
   // bioregion RE
   real<lower=0> bioregion_sd;
   vector[np_bioreg] bioregion_raw;
-  // local parameters for horseshoe prior
-  vector[m_psi-1] zb;
-  vector<lower=0>[m_psi-1] hs_local[2];
-  // horseshoe shrinkage parameters
-  real<lower=0> hs_global[2];
-  real<lower=0> hs_c2;
 }
 
 transformed parameters {
@@ -133,12 +99,6 @@ transformed parameters {
   real log_activ = log(activ);
   // lp_site for RN model
   vector[n_site] log_lambda_psi;
-  // hs betas
-  vector[m_psi-1] beta_covs;
-  vector[m_psi] beta_psi;
-
-  beta_covs = horseshoe(zb, hs_local, hs_global, hs_scale_global, hs_scale_slab^2 * hs_c2);
-  beta_psi = append_row(beta_intercept, beta_covs);
 
   for(b in 1:np_bioreg) {
     eps_bioregion[b] = bioregion_sd * bioregion_raw[b];
@@ -173,7 +133,7 @@ for(n in 1:n_site) {
 model {
   beta_det ~ normal(0, 4); // prior for sigma
   eps_ngs ~ uniform(0, 1); // prior for group size effect
-  beta_intercept ~ normal(-3, 3); // prior for intercept in poisson model
+  beta_psi ~ normal(0, 3); // prior for intercept in poisson model
   activ ~ beta(bshape, bscale);  //informative prior
   bioregion_sd ~ normal(0, 2);
   bioregion_raw ~ normal(0,1);
@@ -184,15 +144,6 @@ model {
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
 }
-  // priors including all constants: poisson
-  target += normal_lpdf(zb | 0, 1);
-  target += normal_lpdf(hs_local[1] | 0, 1)
-    - 101 * log(0.5);
-  target += inv_gamma_lpdf(hs_local[2] | 0.5 * hs_df, 0.5 * hs_df);
-  target += normal_lpdf(hs_global[1] | 0, 1)
-    - 1 * log(0.5);
-  target += inv_gamma_lpdf(hs_global[2] | 0.5 * hs_df_global, 0.5 * hs_df_global);
-  target += inv_gamma_lpdf(hs_c2 | 0.5 * hs_df_slab, 0.5 * hs_df_slab);
 }
 
 generated quantities {

@@ -110,7 +110,6 @@ parameters {
   // temporal availability parameters
   real<lower=0, upper=1> activ; // average activity of deer, equates to the time they are available for detection
   // bioregion RE
-  real bioregion_mu; // non-centred mean for bioregion
   real<lower=0> bioregion_sd; // standard deviation for bioregion random effect
   vector[np_bioreg] bioregion_raw; // bioregion-level effect
   // local parameters for horseshoe prior
@@ -149,7 +148,7 @@ transformed parameters {
   beta_psi = append_row(beta_intercept, beta_covs); // combine intercept and covariates
 
   for(b in 1:np_bioreg) {
-    eps_bioregion[b] = bioregion_mu + bioregion_sd * bioregion_raw[b]; // generate bioregion random effect
+    eps_bioregion[b] = bioregion_sd * bioregion_raw[b]; // generate bioregion random effect
   }
 
 for(n in 1:n_site) {
@@ -208,12 +207,11 @@ if (n_survey[n] > 0) {
 model {
   beta_det ~ normal(0, 4); // prior for sigma
   eps_ngs ~ uniform(0, 1); // prior for group size effect
-  beta_intercept ~ normal(-3, 5); // prior for intercept in poisson model
+  beta_intercept ~ normal(-3, 3); // prior for intercept in poisson model
   beta_trans_det ~ normal(0, 3); // beta for transect detection
   activ ~ beta(bshape, bscale);  //informative prior
-  bioregion_mu ~ normal(0,2); // prior for bioregion RE mean
   bioregion_sd ~ normal(0, 2); // prior for bioregion RE SD
-  bioregion_raw ~ normal(0,2); // prior for bioregion RE effect
+  bioregion_raw ~ normal(0,1); // prior for bioregion RE effect
 
   for(n in 1:n_site) {
   for(j in 1:n_gs) {
@@ -259,7 +257,7 @@ for(n in 1:n_site) {
   log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
   log_lik2[n,j] = poisson_lpmf(n_obs[n,j] | lambda[n,j]); //for loo
   n_obs_true[n, j] = gs[j] * (poisson_log_rng(log_lambda_psi[n] + log(eps_ngs[j])));
-  n_obs_pred[n,j] = gs[j] * (poisson_log_rng(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j]) + log(r[start_idx[n]])) .* survey_area[n]);
+  n_obs_pred[n,j] = gs[j] * poisson_rng(lambda[n,j]);
     }
     // get loglik on a site level
     log_lik[n] = log_sum_exp(log_sum_exp(log_sum_exp(log_lik1[n,]), log_sum_exp(log_lik2[n,])), lp_site[n]);
