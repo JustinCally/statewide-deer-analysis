@@ -9,7 +9,7 @@ author:
     affiliation_url: https://www.ari.vic.gov.au/
 date: 2023-07-06
 output:
-  html_document:
+  distill::distill_article:
     self_contained: true
     toc: true # table of content true
     toc_float: true # make 
@@ -182,9 +182,9 @@ Below we list the MCMC setting for our model. We run models on eight parallel ch
 
 ```{r ModelSettings}
 # STAN settings
-ni <- 500 # sampling iterations
-nw <- 500 # warmup iterations 
-nc <- 8 # number of chains
+ni <- 250 # sampling iterations
+nw <- 250 # warmup iterations 
+nc <- 6 # number of chains
 ```
 
 ## Read in Models
@@ -252,7 +252,7 @@ model_fits <- list()
 model_dir <- "outputs/models"
 
 for(i in 1:length(deer_species_all)) {
-  model_fits[[i]] <- readRDS(paste0(model_dir, "/fit_negbin_", deer_species_all[i], ".rds"))
+  model_fits[[i]] <- readRDS(paste0(model_dir, "/fit_poisson_", deer_species_all[i], ".rds"))
 }
 
 names(model_fits) <-  paste0("fit_poisson_", deer_species_all)
@@ -312,7 +312,7 @@ Posterior predictive checks allow us to compare the observed data to the model-g
 ### Sambar Deer Model.
 
 ```{r ppcSambar, fig.width = 6, fig.height = 6, message = F, fig.cap = "Posterior predictive checks for Sambar Deer"}
-q975 <- function(x) quantile(x, 0.975, na.rm = T)
+q95 <- function(x) quantile(x, 0.95, na.rm = T)
 # q25 <- function(x) quantile(x, 0.25, na.rm = T)
 q75 <- function(x) quantile(x, 0.75, na.rm = T)
 # sd_90 <- function (x, na.rm = FALSE) {
@@ -322,8 +322,8 @@ q75 <- function(x) quantile(x, 0.75, na.rm = T)
 #     na.rm = na.rm))
 # }
 
-funs <- c(max, mean, sd, ppc_scatter_avg)
-titles <- c("Max", "Mean", "SD", "Average Site Counts")
+funs <- c(q95, mean, sd, ppc_scatter_avg)
+titles <- c("95% Percentile", "Mean", "SD", "Average Site Counts")
 
 ppc_sambar <- list()
 
@@ -359,6 +359,9 @@ cowplot::plot_grid(plotlist = ppc_fallow)
 ### Red Deer Model
 
 ```{r ppcRed, fig.width = 6, fig.height = 6, message = F, fig.cap = "Posterior predictive checks for Red Deer"}
+funs <- c(max, mean, sd, ppc_scatter_avg)
+titles <- c("Maximum", "Mean", "SD", "Average Site Counts")
+
 ppc_red <- list()
 
 for(i in 1:length(funs)) {
@@ -643,9 +646,13 @@ Our model uses covariates to inform three seperate submodels:
 + An imperfect detection/observation model based on the transect methods and the camera survey  
 + An abundance model based on spatially-derived convariates, as well as a bioregion random effect.   
 
-## Detection Processes
+## Detection Processes  
+
+At a site, there are two processes that may lead us to not record deer on a camera when in reality they occupy the site (whereby the site is the home range area surrounding the camera.) Firstly, deer may be available for detection and enter the sampling area in front of the camera. However, due to a function of their distance from the camera we fail to detect this individual. Secondly, they may occupy a site (known from transect signs) but never enter the camera field of view, in this case we estimate the various detection rates from the various methods. The detection rate of the camera in this method is regarded as the spatial availability of deer for camera trap sampling. 
 
 ### Distance-sampling
+
+Below we show the average detection rate for a given group of deer in front of the camera (up to 12.5m). Detection rastes appear to be higher for Sambar than other species.  
 
 ```{r AverageDetectionRates}
 species_names <- c("Sambar Deer", "Fallow Deer", "Red Deer", "Hog Deer")
@@ -668,12 +675,16 @@ av_det_rates[[i]] <- det_rates %>%
 av_det_rates %>%
   bind_rows() %>%
   arrange(`Group Size`) %>%
-  kbl("html", digits = 3) %>%
+  kbl("html", digits = 3, caption = "Average detection rates for the different species and different group sizes") %>%
   kable_styling("striped") %>%
   collapse_rows(1)
 ```
 
-```{r DistancePlots, fig.caption="Distance-sampling detection process for Sambar Deer (group size = 1). Herbaceous understorey cover in the area surrounding the camera impacts detection probability."}
+For a group size of 1 we can generate detection function plots that show how detection rates fall-off over varying distances.  
+
+*Note the following data suggests we should test hazard functions for Fallow, Red and Hog*. 
+
+```{r DistancePlots, fig.caption="Distance-sampling detection process for Sambar Deer (group size = 1). Herbaceous understorey cover in the area surrounding the camera impacts detection probability.", fig.width = 8, fig.height = 6}
 site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
     dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
     dplyr::collect() %>%
@@ -688,8 +699,12 @@ site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) 
   delta <- 2.5
   midpts <- c(1.25, 3.75, 6.25, 8.75, 11.25)
   max_distance <- 12.5
+  
+  detection_plot_HN <- list()
+  
+for(i in 1:length(species_names)) {
 
-det_curve <- model_fits[[2]]$draws("DetCurve", format = "draws_matrix") %>%
+det_curve <- model_fits[[i]]$draws("DetCurve", format = "draws_matrix") %>%
   as.data.frame() %>%
   head(250) %>%
   pivot_longer(cols = everything())
@@ -717,7 +732,7 @@ det_curve_sum <- det_curve_wr %>%
             q95 = quantile(value, 0.95))
 
 
-y_combined <- colSums(model_data[[2]]$y[,,1]) %>% # just for group size 1
+y_combined <- colSums(model_data[[i]]$y[,,1]) %>% # just for group size 1
   as.data.frame() %>%
   `colnames<-`("Count") %>%
   mutate(Distance = midpts,
@@ -725,13 +740,12 @@ y_combined <- colSums(model_data[[2]]$y[,,1]) %>% # just for group size 1
          CountS = Count/(2 * 2.5 * Distance)/max_distance^2,
          PropS = CountS/(max(CountS)))
 
-detection_plot_HN <- ggplot(aes(x = Distance), data = det_curve_sum) +
+detection_plot_HN[[i]] <- ggplot(aes(x = Distance), data = det_curve_sum) +
   geom_col(aes(y = PropS), fill = "grey70", colour = "grey20", width = 2.5, data = y_combined, alpha = 0.7) +
   # geom_errorbar(aes(ymin = PropSq5, ymax = PropSq95),  data = y_combined) +
   # geom_line(aes(y = HNS)) +
   geom_ribbon(aes(ymin = q5, ymax = q95, fill = herbaceouslvl), alpha = 0.5) +
   geom_line(aes(y = median, colour = herbaceouslvl)) +
-  ggtitle("Detection rates of Sambar deer at varying distances from the camera") +
   scale_x_continuous(expand = c(0, 0)) +
   scale_y_continuous(expand = c(0, 0), limits = c(0,1)) +
   scale_fill_brewer(palette = "Set1") +
@@ -740,10 +754,14 @@ detection_plot_HN <- ggplot(aes(x = Distance), data = det_curve_sum) +
   labs(fill = "Herbaceous\nUnderstorey\nCover", colour = "Herbaceous\nUnderstorey\nCover") +
   theme_classic()
 
-detection_plot_HN
+}
+
+cowplot::plot_grid(plotlist = detection_plot_HN, ncol = 2)
 ```
 
-### Transect-surveys
+### Transect-surveys  
+
+For Sambar, Fallow and Red Deer we were able to estimate detection rates of the various methods used to detect deer (camera, footprints, pellets, rubbings and wallows).
 
 ```{r detectionplots, fig.width=10, fig.height=4, fig.cap="Detection Probability for the various methods of survey. Camera trap detection probability is based on average deployment length, while transects are based on 3 independent transect searches"}
 det_data_species <- list()
@@ -755,15 +773,15 @@ det_marginal_effects <- list()
 det_plot <- list()
 
 obs_vars <- unlist(stringr::str_remove_all(string = labels(terms(transect_formula)), pattern =  "log|scale|\\)|\\("))
-obs_cols <- unlist(stringr::str_remove_all(string = colnames(model_data[[1]]$trans_pred_matrix), pattern =  "log|scale|\\)|\\("))
-obs_logs <- unlist(stringr::str_detect(string = colnames(model_data[[1]]$trans_pred_matrix), pattern =  "log\\("))
+obs_cols <- unlist(stringr::str_remove_all(string = colnames(model_data[[j]]$trans_pred_matrix), pattern =  "log|scale|\\)|\\("))
+obs_logs <- unlist(stringr::str_detect(string = colnames(model_data[[j]]$trans_pred_matrix), pattern =  "log\\("))
 
 obs_labs <- c("Survey Method")
 
 fac <- c(TRUE, TRUE, TRUE, TRUE, TRUE)
 fac2 <- c(TRUE)
 
-det_obs <- transects %>% 
+det_obs <- model_data[[j]]$transects %>% 
   mutate(Survey = factor(Survey))
 
 params_w_levs <- levels(det_obs$Survey)
@@ -773,7 +791,7 @@ det_marginal_effects[[i]] <- marginal_effects_cmd(all_draws,
                                               param = "beta_trans_det", 
                                               param_number = i, log = obs_logs[i],
                                      model_data = det_obs, 
-                                     model_column = obs_vars[c(1,attr(model_data[[1]]$trans_pred_matrix, "assign")[-1])[i]], 
+                                     model_column = obs_vars[c(1,attr(model_data[[j]]$trans_pred_matrix, "assign")[-1])[i]], 
                                      transition = FALSE) %>%
   mutate(group = param, 
          param = params_w_levs[i], 
@@ -834,7 +852,7 @@ marginal_effects_plot_cmd_all(data_for_plot,
 
 We used a spatially-derived random-effect of the bioregion of the sampled site. This random-effect allows us the ability to make predictions that include the variance associated with this random effect. This random-effect also minimises predictions in areas without deer detections (e.g. the mallee).
 
-```{r bioregions, fig.height=24, fig.width = 5}
+```{r bioregions, fig.height=24, fig.width = 5, fig.cap="Influence of the bioregion random effect on abundance (log-scale). "}
 bioregion_contribution <- function(model, data, species) {
   eps_bioregion <- model$draws("eps_bioregion", format = "matrix")
   bioregion_data <- data[["bioreg_sf"]]
@@ -859,7 +877,7 @@ cowplot::plot_grid(plotlist = bio_plot_data, ncol = 1)
 
 ### Fixed-parameter Effects
 
-```{r FixedEffects, fig.height=10, fig.width = 14, warning = FALSE, message = FALSE}
+```{r FixedEffects, fig.height=10, fig.width = 14, warning = FALSE, message = FALSE, fig.cap="Marginal response curves for the various fixed-effect parameters used in the model."}
 ab_joined_list <- list()
 for(j in 1:length(species_names)) {
 beta_draws <- model_fits[[j]]$draws("beta_psi", format = "df")

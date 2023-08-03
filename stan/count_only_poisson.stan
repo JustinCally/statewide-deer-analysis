@@ -70,7 +70,7 @@ transformed data {
 
 parameters {
  // abundance parameters
-  simplex[n_gs] eps_ngs; // random variation in group size
+  array[n_site] simplex[n_gs] eps_ngs; // random variation in group size
   vector[m_psi] beta_psi;
   vector[det_ncb] beta_det;
   // transect detection parameters
@@ -124,7 +124,7 @@ for(n in 1:n_site) {
     log_p[n,j] = log_sum_exp(log_p_raw[n,,j]);
     p[n,j] = exp(log_p[n,j]);
     // model site abundance
-    lambda[n,j] = exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[j])) .* survey_area[n];
+    lambda[n,j] = exp(log_lambda_psi[n] + log_p[n,j] + log_activ + log(eps_ngs[n,j])) .* survey_area[n];
   }
 
     }
@@ -132,13 +132,13 @@ for(n in 1:n_site) {
 
 model {
   beta_det ~ normal(0, 4); // prior for sigma
-  eps_ngs ~ uniform(0, 1); // prior for group size effect
   beta_psi ~ normal(0, 3); // prior for intercept in poisson model
   activ ~ beta(bshape, bscale);  //informative prior
   bioregion_sd ~ normal(0, 2);
   bioregion_raw ~ normal(0,1);
 
   for(n in 1:n_site) {
+  eps_ngs[n] ~ uniform(0, 1); // prior for group size effect
   for(j in 1:n_gs) {
   target += poisson_lpmf(n_obs[n,j] | lambda[n,j]);
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
@@ -157,6 +157,7 @@ generated quantities {
   array[n_site] real log_lik;
   vector[n_site] Site_lambda;
   vector[n_site] psi;
+  vector[n_site] av_gs_site;
   array[npc] real pred;
   array[npc] real pred_trunc;
   array[np_reg] real Nhat_reg;
@@ -172,7 +173,7 @@ for(n in 1:n_site) {
   for(j in 1:n_gs) {
   log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
   log_lik2[n,j] = poisson_lpmf(n_obs[n,j] | lambda[n,j]); //for loo
-  n_obs_true[n, j] = gs[j] * (poisson_log_rng(log_lambda_psi[n] + log(eps_ngs[j])));
+  n_obs_true[n, j] = gs[j] * (poisson_log_rng(log_lambda_psi[n] + log(eps_ngs[n,j])));
   n_obs_pred[n,j] = gs[j] * poisson_rng(lambda[n,j]);
     }
     // get loglik on a site level
@@ -182,6 +183,7 @@ for(n in 1:n_site) {
     N_site_pred[n] = sum(n_obs_pred[n,]);
     // Occupancy probability transformation
     psi[n] = inv_cloglog(log_lambda_psi[n]);
+    av_gs_site[n] = sum(gs .* eps_ngs[n]);
 
   // loop over distance bins
   for(j in 0:max_int_dist) { // get DS predictions for distance 0 to max bin distance
@@ -189,7 +191,7 @@ for(n in 1:n_site) {
     // DetCurve[n, j+1] =  1 - exp(-(j+0.5/theta)^(-sigma[n])); //hazard rate
     }
 }
-  av_gs = sum(gs .* eps_ngs);
+  av_gs = mean(av_gs_site);
 
 for(i in 1:np_reg) Nhat_reg[i] = 0;
 
