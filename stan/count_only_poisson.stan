@@ -1,3 +1,48 @@
+functions {
+
+    /* Half-normal function
+   * Args:
+   *   sigma: sigma
+   *   midpoints: midpoints
+   * Returns:
+   *   detection probability
+   */
+    vector halfnorm(real sigma, vector midpoints) {
+      int bins = rows(midpoints);
+      vector[bins] p_raw; // detection probability
+
+      p_raw = exp(-(midpoints)^2/(2*sigma^2));
+      return p_raw;
+    }
+
+      /* Hazard function
+   * Args:
+   *   sigma: sigma
+   *   theta: theta
+   *   midpoints: midpoints
+   * Returns:
+   *   detection probability
+   */
+    vector hazard(real sigma, real theta, vector midpoints) {
+      int bins = rows(midpoints);
+      vector[bins] p_raw; // detection probability
+
+      p_raw = 1 - exp(-(midpoints/sigma)^(-theta));
+      return p_raw;
+    }
+
+  vector prob_dist(real sigma, real theta, int keyfun, vector midpoints){
+  int bins = rows(midpoints);
+  vector[bins] out; // detection probability
+
+  if(keyfun == 0){
+    out = halfnorm(sigma, midpoints);
+  } else if(keyfun == 1){
+    out = hazard(sigma, theta, midpoints);
+  }
+  return out;
+  }
+}
 data {
   int<lower=0> N;                      // number of observations
   real delta;                          // bin width
@@ -70,7 +115,7 @@ transformed data {
 
 parameters {
  // abundance parameters
-  array[n_site] simplex[n_gs] eps_ngs; // random variation in group size
+  //array[n_site] simplex[n_gs] eps_ngs; // random variation in group size
   vector[m_psi] beta_psi;
   vector[det_ncb] beta_det;
   // transect detection parameters
@@ -80,6 +125,10 @@ parameters {
   // bioregion RE
   real<lower=0> bioregion_sd;
   vector[np_bioreg] bioregion_raw;
+  // eps group size params
+  vector[n_gs] zeta;
+  vector[n_site] eps_raw;
+  real<lower=0> grp_sd;
 }
 
 transformed parameters {
@@ -99,6 +148,10 @@ transformed parameters {
   real log_activ = log(activ);
   // lp_site for RN model
   vector[n_site] log_lambda_psi;
+  // eps group size
+  array[n_site] simplex[n_gs] eps_ngs; // random variation in group size
+  array[n_site] vector[n_gs] epsi;
+  vector[n_site] eps_site;
 
   for(b in 1:np_bioreg) {
     eps_bioregion[b] = bioregion_sd * bioregion_raw[b];
@@ -118,7 +171,15 @@ for(n in 1:n_site) {
       }
   }
 
+  eps_site[n] = grp_sd * eps_raw[n];
+
   log_lambda_psi[n] = X_psi[n,] * beta_psi + eps_bioregion[site_bioreg[n]];
+
+  for(j in 1:n_gs) {
+    epsi[n,j] = exp(zeta[j] + eps_site[n]);
+  }
+
+  eps_ngs[n] = epsi[n]/sum(epsi[n]);
 
   for(j in 1:n_gs) {
     log_p[n,j] = log_sum_exp(log_p_raw[n,,j]);
@@ -134,8 +195,12 @@ model {
   beta_det ~ normal(0, 4); // prior for sigma
   beta_psi ~ normal(0, 3); // prior for intercept in poisson model
   activ ~ beta(bshape, bscale);  //informative prior
-  bioregion_sd ~ normal(0, 2);
+  bioregion_sd ~ student_t(4, 0, 1);
   bioregion_raw ~ normal(0,1);
+
+  eps_raw ~ std_normal();
+  grp_sd ~ normal(0, 1);
+  zeta ~ normal(0, 2);
 
   for(n in 1:n_site) {
   eps_ngs[n] ~ uniform(0, 1); // prior for group size effect
@@ -156,17 +221,19 @@ generated quantities {
   array[n_site, n_gs] real log_lik2;
   array[n_site] real log_lik;
   vector[n_site] Site_lambda;
-  vector[n_site] psi;
-  vector[n_site] av_gs_site;
+  real av_gs;
+  simplex[n_gs] eps_gs_ave;
   array[npc] real pred;
   array[npc] real pred_trunc;
   array[np_reg] real Nhat_reg;
-  real av_gs;
   // array[np_reg] real Nhat_reg_design;
   real Nhat;
   real Nhat_trunc;
   int trunc_counter;
   trunc_counter = 0;
+
+  eps_gs_ave = exp(zeta)/sum(exp(zeta));
+  av_gs = sum(gs .* eps_gs_ave); //average group size
 
 
 for(n in 1:n_site) {
@@ -181,9 +248,6 @@ for(n in 1:n_site) {
     Site_lambda[n] = exp(log_lambda_psi[n]);
     N_site[n] = sum(n_obs_true[n,]);
     N_site_pred[n] = sum(n_obs_pred[n,]);
-    // Occupancy probability transformation
-    psi[n] = inv_cloglog(log_lambda_psi[n]);
-    av_gs_site[n] = sum(gs .* eps_ngs[n]);
 
   // loop over distance bins
   for(j in 0:max_int_dist) { // get DS predictions for distance 0 to max bin distance
@@ -191,7 +255,6 @@ for(n in 1:n_site) {
     // DetCurve[n, j+1] =  1 - exp(-(j+0.5/theta)^(-sigma[n])); //hazard rate
     }
 }
-  av_gs = mean(av_gs_site);
 
 for(i in 1:np_reg) Nhat_reg[i] = 0;
 

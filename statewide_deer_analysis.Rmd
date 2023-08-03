@@ -381,7 +381,7 @@ cowplot::plot_grid(plotlist = ppc_red)
 ppc_hog <- list()
 
 for(i in 1:length(funs)) {
-ppc_hog[[i]] <- posterior_checks(model = model_fits[[4]], 
+ppc_hog[[i]] <- posterior_checks(model = hog_gs, 
                  model_data = model_data$`Axis porcinus`, 
                  stat = funs[[i]], 
                  integrated = F, only_det = F,
