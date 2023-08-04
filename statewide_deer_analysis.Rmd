@@ -44,12 +44,15 @@ Using these estimates of detection probability in different bins we can then est
 
 ## Modelling density 
 
-The density at a site is modelled as a function of the observed counts, relative frequency of group sizes, distance-sampling detection probability, survey effort (area in front of camera x time camera is deployed for), proportion of time within a 24-hour cycle that deer were active. For a given species the number of detections of groups (1 or more deer) during the deployment is estimated with: 
+The density at a site is modelled as a function of the observed counts, relative frequency of group sizes, distance-sampling detection probability, survey effort (area in front of camera x time camera is deployed for), proportion of time within a 24-hour cycle that deer were active ($activity$). This parameter was estimated using the `activity` R package and included in the model using an informative beta-distribution prior. For a given species the number of detections of groups (1 or more deer) during the deployment is estimated with: 
 
 $$C_{n,j} = poisson(exp(log(\lambda_{n}) + log(p_{n,j}) + log(activity) + log(\epsilon gs_{n,j}) + log(r)) \times survey\ area_n)$$
-Where $C_{n,j}$ is the observed count of groups at a site, $\lambda_{n}$ is the true density at a site, given by, where $X_n$ are the values of the fixed-effect covariates, $\beta$ are the fixed effect coefficients and $\epsilon bioregion_n$ is the bioregion random effect drawn from a standard normal distribution.    
+Where $C_{n,j}$ is the observed count of group size ($j$) at a site ($n$). $\lambda_{n}$ is the true density at a site. In this model $X_n$ are the values of the fixed-effect covariates, $\beta$ are the fixed effect coefficients and $\epsilon bioregion_n$ is the bioregion random effect drawn from a standard normal distribution:    
 
 $$\lambda_{n} = X_n \times \beta + \epsilon bioregion_n$$
+The $\epsilon gs_{n,j}$ is the proportional variation in group size ar a site, where $\sum \epsilon gs_{n,j \in [1,max(group\ size)]} = 1$. Assuming that the rate of group sizes can vary between sites, we model the variation in group size between sites with a random effect:  
+
+$$ $$
 
 # Setup
 

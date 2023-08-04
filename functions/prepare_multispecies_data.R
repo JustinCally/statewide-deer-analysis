@@ -280,7 +280,7 @@ prepare_model_data_multispecies <- function(species,
 
   ### Variable group size ####
   # Get number of observations at each group size
-  n_obs <- table(dcount$SiteID, dcount$size, dcount$Species)[,-1,] # remove zeros
+  n_obs <- table(dcount$SiteID, dcount$size, dcount$Species)[,-1,species] # remove zeros
   n_gs <- ncol(n_obs)
   gs <- as.integer(colnames(n_obs))
 
@@ -376,13 +376,11 @@ prepare_model_data_multispecies <- function(species,
       dplyr::ungroup() %>%
       arrange(SiteID, Survey)
 
-    transects_ne <- site_vars %>%
-      dplyr::left_join(transects_grouped) %>%
+    transects_ne <- transects_grouped %>%
       dplyr::mutate(surveyed = dplyr::coalesce(surveyed, 0),
                     site = as.numeric(factor(SiteID)))
 
-    transects_ne_all <- site_vars %>%
-      dplyr::left_join(transects) %>%
+    transects_ne_all <- transects %>%
       dplyr::mutate(surveyed = dplyr::coalesce(surveyed, 0),
                     site = as.numeric(factor(SiteID)))
 
