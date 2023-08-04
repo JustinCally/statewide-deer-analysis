@@ -21,6 +21,36 @@ slug: statewidedeer
 bibliography: bibliography.bib
 ---
 
+# Methods used to estimate deer density  
+
+## Camera detection 
+
+The density of deer at a given site can be estimated using camera-trap distance sampling (CTDS). CTDS is a modified form of distance-sampling that allows us to infer the probability a given individual will be detected within the survey area (area in front of the camera). This detection probability is a function of the distance of the individual from the camera, whereby individuals entering the camera field of view further from the camera have a lower detection probability up to a given truncation distance from the camera where detection probability is near-zero.  
+
+An underlying assumption about CTDS is that the probability a deer will be available for detection at any given point location within the camera field of view is equal. Under this assumption, for a point transect, we take into account the total area for each distance-bin area, which increases at further distance bins. However, in this study we implement a novel method that considers group size of the detected species in the availability calculations. For larger groups, CTDS should account for the availability of the closest individual rather than the availability of all individuals. When group size increases it is more likely the the closest individual from the group is closer to the camera. If we assume that the triggering of the camera is dependent upon the closest individual than we must adjust our estimated availability to account for variable group sizes. If we do not adjust for group size and only use the distance to the closest individual for our DS models then we will likely underestimate the detection rate as distances will be smaller than reality. Alternatively, if we record distances to multiple individuals in the same photo and take an average or model them independently we would likely overestimate detection probability because individuals at further distances are recorded because a closer individual has triggered the camera trap. For more information on how group size is likely to effect CTDS abundance estimates a simulation study has been written here: https://justincally.github.io/blog/posts/2022-11-10-ctds-for-groups/
+
+In this study we investigate two possible detection functions that may explain how detection rates 'fall off' over the distances from the camera. Firstly a half-normal detection function given by: 
+
+$$p = exp(-y^2/2\sigma^2) $$
+Hereby $p$ is the probability of detection, $y$ is the distance from the camera (midpoint of the detection bin), and $\sigma$ is the shape parameter. Alternatively, we compare the fit of this detection function to a hazard-rate function, where detection probability is given by:  
+
+$$p = 1 - exp(-(y/\sigma)^{-\theta})$$
+In these hazard-rate models, an additional parameter ($\theta$) is estimated, which is *scale* parameter. Given that detection rate may not necessarily be uniform across sites we model the magnitude of the *shape* parameter across sites (i) as:  
+
+$$log(\sigma_i) = \alpha + \beta_{det} \times HU_i$$
+Where $HU_i$ is the amount of herbaceous understorey measured surrounding the camera. $\beta_{det}$ is the coefficient for the effect of herbaceous understorey on detection and $\alpha$ is the intercept.    
+
+Using these estimates of detection probability in different bins we can then estimate the average detection probability of an individual at a given camera station. This can then be used to account for imperfect detection when fitting observed counts from the camera trap to parameters estimating the true abundance at a site. 
+
+## Modelling density 
+
+The density at a site is modelled as a function of the observed counts, relative frequency of group sizes, distance-sampling detection probability, survey effort (area in front of camera x time camera is deployed for), proportion of time within a 24-hour cycle that deer were active. For a given species the number of detections of groups (1 or more deer) during the deployment is estimated with: 
+
+$$C_{n,j} = poisson(exp(log(\lambda_{n}) + log(p_{n,j}) + log(activity) + log(\epsilon gs_{n,j}) + log(r)) \times survey\ area_n)$$
+Where $C_{n,j}$ is the observed count of groups at a site, $\lambda_{n}$ is the true density at a site, given by, where $X_n$ are the values of the fixed-effect covariates, $\beta$ are the fixed effect coefficients and $\epsilon bioregion_n$ is the bioregion random effect drawn from a standard normal distribution.    
+
+$$\lambda_{n} = X_n \times \beta + \epsilon bioregion_n$$
+
 # Setup
 
 Load in relevant packages for analysis, additionally, connect to the database. Camera trap and site data is stored on the database.
@@ -174,6 +204,9 @@ saveRDS(model_data, model_data_file)
 }
 ```
 
+
+
+
 # Model Execution
 
 ## Model settings
@@ -182,8 +215,8 @@ Below we list the MCMC setting for our model. We run models on eight parallel ch
 
 ```{r ModelSettings}
 # STAN settings
-ni <- 250 # sampling iterations
-nw <- 250 # warmup iterations 
+ni <- 200 # sampling iterations
+nw <- 200 # warmup iterations 
 nc <- 6 # number of chains
 ```
 
@@ -202,11 +235,59 @@ These are the models used in the analysis. The first is an integrated model that
 ```{r models, echo = FALSE, warning=FALSE}
 model_poisson <- cmdstan_model(here::here("stan", "count_det_nondet_poisson.stan"))
 model_poisson_co <- cmdstan_model(here::here("stan", "count_only_poisson.stan"))
+model_poisson_co_ms <- cmdstan_model(here::here("stan", "count_only_poisson_ms.stan"))
+model_poisson_ms <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms.stan"))
+```
+
+## Test multispecies model
+
+```{r}
+multispecies_data <- prepare_model_data_multispecies(species = c("Cervus unicolor", 
+                                                                 "Dama dama", 
+                                                                 "Cervus elaphus"),
+                                 projects = project_short_name,
+                     buffer = spatial_buffer,
+                     detection_formula = det_formula,
+                     abundance_formula = ab_formula_2,
+                     transect_formula = transect_formula,
+                     con = con,
+                     raster_dir = raster_files,
+                     prediction_raster = prediction_raster,
+                     n_max_no_det = n_max_no_det,
+                     n_max_det = n_max_det,
+                     evaltransects = TRUE,
+                     snapshot_interval = 2, 
+                     hs_df = 1,
+                     hs_df_global = 1,
+                     hs_scale_global = 2/sqrt(nrow(cams_curated)), # ratio of expected non-zero to zero divided by total observation as per brms convention
+                     hs_scale_slab = 1,
+                     hs_df_slab = 4)
+
+multispecies_data$keyfun <- 0
+multispecies_data$raw_data[is.na(multispecies_data$raw_data)] <- 0
+multispecies_data$transects[is.na(multispecies_data$transects)] <- 0
+
+multispecies_test <- model_poisson_ms$sample(data = multispecies_data, 
+                                                chains = nc,
+                                 parallel_chains = nc, 
+                                 init = 0.1, 
+                                 max_treedepth = 10, 
+                                 refresh = 20, 
+                                 step_size = 0.01, 
+                                 adapt_delta = 0.99,
+                                 show_messages = TRUE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = ni, 
+                                 iter_warmup = nw)
 ```
 
 ## Fit models
 
-We can fit models using `cmdstanr`. Here we fit models using a poisson distribution. One model for each of the four deer species. To aid convergence `adapt_delta` is increased from the default value.
+We can fit models using `cmdstanr`. Here we fit models using a poisson distribution. To aid convergence `adapt_delta` is increased from the default value. The models we compare are:  
+
++ Model with key abundance covariates and half-normal detection function
++ Model with key abundance covariates and hazard-rate detection function 
++ Null-model (bioregion only) with half-normal detection function 
 
 ```{r FitModels, eval = FALSE}
 integrated_model <- c(TRUE, TRUE, TRUE, FALSE)

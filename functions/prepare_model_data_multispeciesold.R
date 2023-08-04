@@ -1,6 +1,6 @@
 # Prepare Data Function
 
-prepare_model_data_multispecies <- function(species,
+prepare_model_data_multispecies_old <- function(species,
                                projects,
                                buffer,
                                detection_formula,
