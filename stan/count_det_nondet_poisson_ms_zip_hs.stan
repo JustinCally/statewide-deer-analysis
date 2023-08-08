@@ -1,5 +1,25 @@
 functions {
 
+  /* Efficient computation of the horseshoe prior
+   * Args:
+   *   zb: standardized population-level coefficients
+   *   global: global horseshoe parameters
+   *   local: local horseshoe parameters
+   *   scale_global: global scale of the horseshoe prior
+   *   c2: positive real number for regularization
+   * Returns:
+   *   population-level coefficients following the horseshoe prior
+   */
+  vector horseshoe(vector zb, vector[] local, real[] global,
+                   real scale_global, real c2) {
+    int K = rows(zb);
+    vector[K] lambda = local[1] .* sqrt(local[2]);
+    vector[K] lambda2 = square(lambda);
+    real tau = global[1] * sqrt(global[2]) * scale_global;
+    vector[K] lambda_tilde = sqrt(c2 * lambda2 ./ (c2 + tau^2 * lambda2));
+    return zb .* lambda_tilde * tau;
+  }
+
     /* Half-normal function
    * Args:
    *   sigma: sigma
@@ -104,6 +124,12 @@ data {
 
   // key function, 0 = halfnorm
   int keyfun;
+  // hs params
+  real<lower=0> hs_df; // horseshoe prior param
+  real<lower=0> hs_df_global;
+  real<lower=0> hs_df_slab;
+  real<lower=0> hs_scale_global;
+  real<lower=0> hs_scale_slab;
 }
 
 transformed data {
@@ -122,7 +148,8 @@ transformed data {
 parameters {
  // abundance parameters
   //array[n_site] simplex[n_gs] eps_ngs; // random variation in group size
-  array[S] vector[m_psi] beta_psi;
+  // array[S] vector[m_psi] beta_psi;
+  array[S] vector[1] beta_intercept;
   vector[det_ncb] beta_det;
   real log_theta;
   // transect detection parameters
@@ -130,17 +157,28 @@ parameters {
   // temporal availability parameters
   real<lower=0, upper=1> activ;
   // bioregion RE
-  array[S] real<lower=0> bioregion_sd;
-  array[S] vector[np_bioreg] bioregion_raw;
+  // array[S] real<lower=0> bioregion_sd;
+  // array[S] vector[np_bioreg] bioregion_raw;
+  // bioregion RE ZIP
+  array[S] real bioregion_mu_zip;
+  array[S] real<lower=0> bioregion_sd_zip;
+  array[S] vector[np_bioreg] bioregion_raw_zip;
   // eps group size params
   array[S] vector[n_gs] zeta;
   array[S] matrix[n_site, n_gs] eps_raw;
   array[S] real<lower=0> grp_sd;
+  // local parameters for horseshoe prior
+  array[S] vector[m_psi-1] zb;
+  array[S, 2] vector<lower=0>[m_psi-1] hs_local;
+  // horseshoe shrinkage parameters
+  array[S, 2] real<lower=0> hs_global;
+  array[S] real<lower=0> hs_c2;
 }
 
 transformed parameters {
   // random effects
-  array[S] vector[np_bioreg] eps_bioregion; // bioregion random effect
+  // array[S] vector[np_bioreg] eps_bioregion; // bioregion random effect
+  array[S] vector[np_bioreg] eps_bioregion_zip; // bioregion random effect
   // distance parameters
   array[n_site] real log_sigma;
   array[n_site] real sigma;
@@ -163,6 +201,16 @@ transformed parameters {
   array[S, n_site] vector[n_gs] epsi;
   array[S] matrix[n_site, n_gs] eps_site;
   real<lower=0> theta = exp(log_theta);
+  array[S] vector[n_site] logit_phi;
+  array[S] vector<lower=0, upper=1>[n_site] phi;
+  // hs betas
+  array[S] vector[m_psi-1] beta_covs;
+  array[S] vector[m_psi] beta_psi;
+
+  for(s in 1:S) {
+  beta_covs[s] = horseshoe(zb[s], hs_local[s,,], hs_global[s,], hs_scale_global, hs_scale_slab^2 * hs_c2[s]);
+  beta_psi[s] = append_row(beta_intercept[s], beta_covs[s]);
+  }
 
 for(n in 1:n_site) {
   log_sigma[n] = det_model_matrix[n,] * beta_det;
@@ -181,10 +229,15 @@ for(n in 1:n_site) {
 
   for(s in 1:S) {
   for(b in 1:np_bioreg) {
-    eps_bioregion[s,b] = bioregion_sd[s] * bioregion_raw[s,b];
+    // eps_bioregion[s,b] = bioregion_sd[s] * bioregion_raw[s,b];
+    eps_bioregion_zip[s,b] = bioregion_mu_zip[s] + bioregion_sd_zip[s] * bioregion_raw_zip[s,b];
   }
 
-  log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s] + eps_bioregion[s,site_bioreg[n]];
+  // define log lambda
+  logit_phi[s,n] = eps_bioregion_zip[s,site_bioreg[n]];
+  phi[s,n] = inv_logit(logit_phi[s,n]);
+
+  log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s]; // + eps_bioregion[s,site_bioreg[n]];
 
   for(j in 1:n_gs) {
     eps_site[s, n,j] = grp_sd[s] * eps_raw[s,n,j];
@@ -210,14 +263,17 @@ for(n in 1:n_site) {
 if (n_survey[n] > 0) {
   array[n_max[n,s] - any_seen[s,n] + 1] real lp;
     if(any_seen[s,n] == 0){ // not seen
-      lp[1] = poisson_lpmf(0 | exp(log_lambda_psi[s,n]));
+      lp[1] = log_sum_exp(bernoulli_lpmf(0 | phi[s,n]),
+      bernoulli_lpmf(1 | phi[s,n]) + poisson_lpmf(0 | exp(log_lambda_psi[s,n])));
     }
-    else lp[1] = poisson_log_lpmf(1 | log_lambda_psi[s,n]) +
+    else lp[1] = bernoulli_lpmf(1 | phi[s,n]) +
+    poisson_log_lpmf(1 | log_lambda_psi[s,n]) +
     bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
      // loop through possible values for maximum count (km2)
     for (j in 2:(n_max[n,s] - any_seen[s,n] + 1)){
-      lp[j] = poisson_log_lpmf(any_seen[s,n] + j - 1 | log_lambda_psi[s,n])
-      + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[s,n] + j - 1));
+      lp[j] = bernoulli_lpmf(1 | phi[s,n]) +
+      poisson_log_lpmf(any_seen[s,n] + j - 1 | log_lambda_psi[s,n]) +
+      bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[s,n] + j - 1));
     }
     lp_site[s,n] = log_sum_exp(lp);
   } else {
@@ -228,11 +284,13 @@ if (n_survey[n] > 0) {
 }
 
 model {
-
   for(s in 1:S) {
-    beta_psi[s] ~ normal(0, 3); // prior for intercept in poisson model
-    bioregion_sd[s] ~ normal(0,2);
-    bioregion_raw[s,] ~ normal(0,1);
+    beta_intercept[s] ~ normal(0, 2); // prior for poisson model
+    // bioregion_sd[s] ~ student_t(4, 0, 1);
+    // bioregion_raw[s,] ~ normal(0,1);
+    bioregion_mu_zip[s] ~ normal(0,2);
+    bioregion_sd_zip[s] ~ student_t(4, 0, 1);
+    bioregion_raw_zip[s,] ~ normal(0,1);
     to_vector(eps_raw[s,,]) ~ std_normal();
     grp_sd[s] ~ normal(0, 1);
     zeta[s,] ~ normal(0, 2);
@@ -245,7 +303,13 @@ model {
   for(n in 1:n_site) {
   for(j in 1:n_gs) {
   for(s in 1:S) {
-  target += poisson_lpmf(n_obs[n,j,s] | lambda[s,n,j]);
+  if(any_seen[s,n] > 0) {
+      target += bernoulli_lpmf(1 | phi[s,n]) +
+        poisson_lpmf(n_obs[n,j,s] | lambda[s,n,j]);
+  } else {
+      target += log_sum_exp(bernoulli_lpmf(0 | phi[s,n]), bernoulli_lpmf(1 | phi[s,n]) +
+      poisson_lpmf(n_obs[n,j,s] | lambda[s,n,j]));
+  }
         }
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
@@ -253,6 +317,19 @@ model {
   target += lp_site[s, n];
   }
 }
+
+for(s in 1:S) {
+    // priors including all constants: poisson
+  target += normal_lpdf(zb[s] | 0, 1);
+  target += normal_lpdf(hs_local[s,,1] | 0, 1)
+    - 101 * log(0.5);
+  target += inv_gamma_lpdf(hs_local[s,,2] | 0.5 * hs_df, 0.5 * hs_df);
+  target += normal_lpdf(hs_global[s,1] | 0, 1)
+    - 1 * log(0.5);
+  target += inv_gamma_lpdf(hs_global[s,2] | 0.5 * hs_df_global, 0.5 * hs_df_global);
+  target += inv_gamma_lpdf(hs_c2[s] | 0.5 * hs_df_slab, 0.5 * hs_df_slab);
+}
+
 }
 
 generated quantities {
@@ -277,6 +354,7 @@ generated quantities {
   real Nhat_sum;
   int trunc_counter[S];
   trunc_counter[S] = 0;
+  array[S] vector<lower=0,upper=1>[npc] phi_pred;
 
 for(s in 1:S) {
   eps_gs_ave[s] = exp(zeta[s])/sum(exp(zeta[s]));
@@ -298,9 +376,19 @@ for(n in 1:n_site) {
     log_lik[n] = log_sum_exp(log_sum_exp(log_sum_exp(log_lik1[n,]),
     log_sum_exp(log_lik2_site[n,])), log_sum_exp(lp_site[,n]));
       for(s in 1:S) {
+    real log_p_unobs;
     Site_lambda[s,n] = exp(log_lambda_psi[s,n]);
     N_site[s,n] = sum(n_obs_true[s,n,]);
     N_site_pred[s,n] = sum(n_obs_pred[s,n,]);
+
+    if(any_seen[s,n] == 0) {
+      if(bernoulli_rng(phi[s,n])==0)
+         N_site[s,n] = 0;
+      log_p_unobs = log(phi[s,n]) + poisson_log_lpmf(0 | log_lambda_psi[s,n]);
+      if(bernoulli_rng(exp(log_p_unobs))==0)
+        N_site_pred[s,n] = 0;
+    }
+
       }
 
   // loop over distance bins
@@ -319,7 +407,12 @@ for(s in 1:S) {
 for(i in 1:np_reg) Nhat_reg[s,i] = 0;
 
 for(i in 1:npc) {
-  pred[s,i] = poisson_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
+  phi_pred[s,i] = inv_logit(eps_bioregion_zip[s, pred_bioreg[i]]);
+  if(bernoulli_rng(phi_pred[s,i]) == 1) {
+  pred[s,i] = poisson_log_rng(X_pred_psi[i,] * beta_psi[s]) * prop_pred[i] * av_gs[s]; //offset
+  } else {
+    pred[s,i] = 0;
+  }
   if(pred[s,i] > max(N_site[s,])) {
     pred_trunc[s,i] = max(N_site[s,]);
     trunc_counter[s] += 1;
