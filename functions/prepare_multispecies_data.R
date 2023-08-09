@@ -155,7 +155,9 @@ prepare_model_data_multispecies <- function(species,
                                                                            sf::st_buffer(buffer),
                                                                          fun = "mean",
                                                                          colname_fun = function(values, fun_name, weights, fun_value, nvalues, nweights)  values)) %>%
-    sf::st_drop_geometry()
+    sf::st_drop_geometry() %>%
+    dplyr::mutate(PastureDistance = plyr::round_any(PastureDistance, 100, ceiling))
+
 
   # Elevation is an issue
   combined_spatial_data$Elevation[is.na(combined_spatial_data$Elevation)] <- 0
@@ -197,6 +199,11 @@ prepare_model_data_multispecies <- function(species,
   site_loc_cells <- terra::cells(vic_model_data_resampled, terra::vect(site_locs))[,"cell"]
 
   vic_model_data_resampled_df <- terra::as.data.frame(vic_model_data_resampled, xy = TRUE, cell = TRUE, na.rm = TRUE)
+
+  if("PastureDistance" %in% colnames(vic_model_data_resampled_df)) {
+    vic_model_data_resampled_df <- vic_model_data_resampled_df %>%
+      dplyr::mutate(PastureDistance = plyr::round_any(PastureDistance, 100, ceiling))
+  }
 
   # picker <-  function(x, viable_numbers) {
   #   min(viable_numbers[viable_numbers >= x])

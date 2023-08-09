@@ -26,9 +26,9 @@ posterior_checks <- function(model, model_data, stat, title, integrated = F, onl
     which_inc <- seq(1:length(n_obs_totals))
   }
 
-  if(integrated) {
-    n_obs_totals <- pmax(n_obs_totals, model_data[["any_seen"]])
-  }
+  # if(integrated) {
+  #   n_obs_totals <- pmax(n_obs_totals, model_data[["any_seen"]])
+  # }
 
   model_draws <- model$draws("N_site_pred", format = "matrix")
 
@@ -76,7 +76,7 @@ posterior_checks_multispecies <- function(model, model_data, species_index,
   }
 
   if(integrated) {
-    n_obs_totals <- pmax(n_obs_totals, model_data[["any_seen"]])
+    n_obs_totals <- pmax(n_obs_totals, model_data[["any_seen"]][species_index,])
   }
 
   model_draws <- model$draws("N_site_pred", format = "matrix")

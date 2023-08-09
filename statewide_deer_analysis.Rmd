@@ -111,7 +111,7 @@ Outline which species should be modeled, and which projects to source data from.
 
 ```{r data_params}
 # Species to run model for.
-deer_species_all <- c("Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
+deer_species_all <- c("Cervus unicolor", "Dama dama", "Cervus elaphus")
 # Projects to select.
 project_short_name <- c("hog_deer_2023", "StatewideDeer")
 # Buffer for data extraction.
@@ -121,8 +121,8 @@ raster_files <- "/Volumes/DeerVic\ Photos/Processed_Rasters"
 # raster_files <- "data/prediction_raster"
 prediction_raster <- "data/prediction_raster/statewide_raster.tif"
 # For the integrated model we place limits on the maximum density of deer to integrate over. In cases where there are no detections on the camera this is limited to 15 per km2. In cases where deer were detetected on the camera this is expanded to 50. We believe this is sufficiently high. Very high values of these will be less efficient. 
-n_max_no_det <- 15
-n_max_det <- 30
+n_max_no_det <- 20
+n_max_det <- 50
 ```
 
 ## Camera locations
@@ -150,11 +150,18 @@ Here we outline formulas to be used in the models. The formulas account for the 
 transect_formula <- ~Survey
 
 #### Abundance Formula Options #### 
+ab_formula_1 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(BIO15) + scale(sqrt(ForestEdge)) + 
+  scale(sqrt(MRVBF)) + scale(sqrt(SLOPE)) + scale(sqrt(NonPhotosyntheticVeg))
 # Simple Formula
 ab_formula_2 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(TreeDensity) + scale(sqrt(ForestEdge))
 
 # Simple with Coastal Distance: Hog Deer
 ab_formula_3 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(TreeDensity) + scale(sqrt(ForestEdge)) + scale(dist_coast) 
+
+ab_formula_4 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(BIO15) + scale(sqrt(ForestEdge))
+
+ab_formula_5 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(BIO15) + scale(sqrt(ForestEdge)) + 
+  scale(sqrt(MRVBF)) 
 
 #### Detection Formula: Distance-sampling ####
 det_formula <- ~ scale(HerbaceousUnderstoryCover) # average detection across all sites #scale(HerbaceousUnderstoryCover)
@@ -227,8 +234,8 @@ Below we list the MCMC setting for our model. We run models on eight parallel ch
 
 ```{r ModelSettings}
 # STAN settings
-ni <- 400 # sampling iterations
-nw <- 400 # warmup iterations 
+ni <- 200 # sampling iterations
+nw <- 200 # warmup iterations 
 nc <- 8 # number of chains
 ```
 
@@ -250,7 +257,10 @@ model_poisson_co <- cmdstan_model(here::here("stan", "count_only_poisson.stan"))
 model_poisson_co_ms <- cmdstan_model(here::here("stan", "count_only_poisson_ms.stan"))
 model_poisson_ms <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms.stan"))
 model_poisson_ms_zip <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms_zip.stan"))
-model_poisson_ms_zip_hs <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms_zip_hs.stan"))
+model_negbin_ms_zip <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_zip.stan"))
+model_poisson_co_ms_zip <- cmdstan_model(here::here("stan", "count_only_poisson_ms_zip.stan"))
+model_poisson_ms_zip_re <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms_zip_re.stan"))
+# model_poisson_ms_zip_hs <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms_zip_hs.stan"))
 ```
 
 ## Test multispecies model
@@ -262,7 +272,7 @@ multispecies_data <- prepare_model_data_multispecies(species = c("Cervus unicolo
                                  projects = project_short_name,
                      buffer = spatial_buffer,
                      detection_formula = det_formula,
-                     abundance_formula = ab_formula_2,
+                     abundance_formula = ab_formula_4,
                      transect_formula = transect_formula,
                      con = con,
                      raster_dir = raster_files,
@@ -273,15 +283,15 @@ multispecies_data <- prepare_model_data_multispecies(species = c("Cervus unicolo
                      snapshot_interval = 2, 
                      hs_df = 1,
                      hs_df_global = 1,
-                     hs_scale_global = 2/sqrt(nrow(cams_curated)), # ratio of expected non-zero to zero divided by total observation as per brms convention
-                     hs_scale_slab = 1,
+                     hs_scale_global = 1, 
+                     hs_scale_slab = 0.5,
                      hs_df_slab = 4)
 
 multispecies_data$keyfun <- 0 # 0 = HN
 multispecies_data$raw_data[is.na(multispecies_data$raw_data)] <- 0
 multispecies_data$transects[is.na(multispecies_data$transects)] <- 0
 
-saveRDS(multispecies_data, "data/multispecies_data.rds")
+saveRDS(multispecies_data, "data/multispecies_data_4.rds")
 
 
 multispecies_models <- list()
@@ -310,37 +320,48 @@ multispecies_models[[i]]$save_object(paste("outputs/models/multispecies_",i,".rd
 
 ```{r}
 multispecies_data$keyfun <- 0
+
 multispecies_model_zip <- model_poisson_ms_zip$sample(data = multispecies_data, 
                                                 chains = 8,
                                  parallel_chains = 8, 
                                  init = 0.1, 
                                  max_treedepth = 10, 
                                  refresh = 20, 
-                                 step_size = 0.01, 
-                                 adapt_delta = 0.99,
+                                 # step_size = 0.01, 
+                                 adapt_delta = 0.995,
                                  show_messages = TRUE,
                                  save_warmup = FALSE,
-                                 iter_sampling = 200, 
-                                 iter_warmup = 200)
+                                 iter_sampling = 150, 
+                                 iter_warmup = 150)
 
-multispecies_model_zip$save_object("outputs/models/multispecies_zip_2.rds")
-```
-
-```{r}
-multispecies_model_zip_hs <- model_poisson_ms_zip_hs$sample(data = multispecies_data, 
-                                                chains = 6,
-                                 parallel_chains = 6, 
+multispecies_co_zip <- model_poisson_co_ms_zip$sample(data = multispecies_data, 
+                                                chains = 2,
+                                 parallel_chains = 2, 
                                  init = 0.1, 
                                  max_treedepth = 10, 
                                  refresh = 20, 
-                                 step_size = 0.01, 
-                                 adapt_delta = 0.99,
+                                 # step_size = 0.01, 
+                                 adapt_delta = 0.995,
                                  show_messages = TRUE,
                                  save_warmup = FALSE,
-                                 iter_sampling = 100, 
-                                 iter_warmup = 100)
-```
+                                 iter_sampling = 150, 
+                                 iter_warmup = 150)
 
+# multispecies_model_zip_co <- model_poisson_co_ms_zip$sample(data = multispecies_data, 
+#                                                 chains = 8,
+#                                  parallel_chains = 8, 
+#                                  init = 0.1, 
+#                                  max_treedepth = 10, 
+#                                  refresh = 20, 
+#                                  # step_size = 0.01, 
+#                                  # adapt_delta = 0.99,
+#                                  show_messages = TRUE,
+#                                  save_warmup = FALSE,
+#                                  iter_sampling = 200, 
+#                                  iter_warmup = 200)
+
+multispecies_model_zip$save_object("outputs/models/multispecies_model_zip.rds")
+```
 
 ## Fit models
 
@@ -433,33 +454,32 @@ Posterior predictive checks allow us to compare the observed data to the model-g
 
 ### Sambar Deer Model.
 
-```{r ppcSambar, fig.width = 6, fig.height = 6, message = F, fig.cap = "Posterior predictive checks for Sambar Deer"}
+```{r ppcSambar, fig.width = 6, fig.height = 8, message = F, fig.cap = "Posterior predictive checks for Sambar Deer"}
 q95 <- function(x) quantile(x, 0.95, na.rm = T)
 # q25 <- function(x) quantile(x, 0.25, na.rm = T)
 q75 <- function(x) quantile(x, 0.75, na.rm = T)
-# sd_90 <- function (x, na.rm = FALSE) {
-#   quants <- quantile(x, c(0.0, 0.95), na.rm = T)
-#   x <- x[x < quants[2] & x > quants[1]]
-#   sqrt(var(if (is.vector(x) || is.factor(x)) x else as.double(x),
-#     na.rm = na.rm))
-# }
+sd_90 <- function (x, na.rm = FALSE) {
+  quants <- quantile(x, c(0.05, 0.95), na.rm = T)
+  x <- x[x < quants[2] & x > quants[1]]
+  sqrt(var(if (is.vector(x) || is.factor(x)) x else as.double(x),
+    na.rm = na.rm))
+}
 
-funs <- c(q95, mean, sd, ppc_scatter_avg)
-titles <- c("95% Percentile", "Mean", "SD", "Average Site Counts")
+funs <- c(max, mean, sd, ppc_scatter_avg, prop_zero, sd_90)
+titles <- c("Max", "Mean", "SD", "Average Site Counts", "Proportion Zeros", "SD 90 %")
 
 ppc_sambar <- list()
 
 # funs <- c(prop_zero, mean, q90, sd)
 
 for(i in 1:length(funs)) {
-ppc_sambar[[i]] <- posterior_checks_multispecies(model = multispecies_models[[1]], 
-                 model_data = multispecies_data, species_index = 1,
-                 stat = funs[[i]], 
-                 integrated = F, 
+ppc_sambar[[i]] <- posterior_checks_multispecies(model = multispecies_model_zip, 
+                 model_data = multispecies_data, species_index = 2,
+                 stat = funs[[i]], integrated = T,
                  title = titles[i])
 }
 
-cowplot::plot_grid(plotlist = ppc_sambar, labels = "AUTO")
+cowplot::plot_grid(plotlist = ppc_sambar, labels = "AUTO", ncol = 2)
 ```
 
 ### Fallow Deer Model
@@ -530,9 +550,16 @@ vic_regions <- vicmap_query("open-data-platform:delwp_region") %>%
   st_simplify(dTolerance = 500)
 
 
-site_preds <- function(model, cams_curated) {
-  rn_dens <- model$summary("N_site")
-  density_at_sites_rn <- cbind(cams_curated, rn_dens)
+site_preds <- function(model, cams_curated, species_index) {
+  
+rn_dens <- model$summary("N_site")
+  
+which_sp <- which(stringr::str_detect(string = rn_dens$variable,
+                                         pattern = paste0("N_site\\[",
+                                                          species_index)))
+  
+
+  density_at_sites_rn <- cbind(cams_curated, rn_dens[which_sp, ])
   
   return(density_at_sites_rn)
 }
@@ -561,15 +588,13 @@ return(plot)
   
 }
 
-sambar_preds <- site_preds(model_fits[[1]], cams_curated = cams_curated)
-fallow_preds <- site_preds(model_fits[[2]], cams_curated = cams_curated)
-red_preds <- site_preds(model_fits[[3]], cams_curated = cams_curated)
-hog_preds <- site_preds(model_fits[[4]], cams_curated = cams_curated)
+sambar_preds <- site_preds(multispecies_model_zip, cams_curated = cams_curated, species_index = 1)
+fallow_preds <- site_preds(multispecies_model_zip, cams_curated = cams_curated, species_index = 2)
+red_preds <- site_preds(multispecies_model_zip, cams_curated = cams_curated, species_index = 3)
 
 cowplot::plot_grid(site_density_plot(sambar_preds, vic_regions, species = "Sambar"),
 site_density_plot(fallow_preds, vic_regions, species = "Fallow"),
-site_density_plot(red_preds, vic_regions, species = "Red"),
-site_density_plot(hog_preds, vic_regions, species = "Hog"), ncol = 1)
+site_density_plot(red_preds, vic_regions, species = "Red"), ncol = 1)
 ```
 
 ### Site-density Summaries
@@ -577,15 +602,15 @@ site_density_plot(hog_preds, vic_regions, species = "Hog"), ncol = 1)
 As a sanity-check we compare the average modelled densities at sites with (i) no evidence of deer, (ii) evidence of deer present on transects, and (iii) evidence of deer present on cameras. We expect that average densities are generally higher at sites that detected some form of deer than sites that did not detect any sign of deer. Additionally, we would also expect average densities to be generally higher at sites that had detections on cameras than those with only detections from transects. The table below shows these expectations to be correct for Sambar and partially for Fallow. Red Deer had too few detections for this check to be comprehensive but alongside Hog Deer, Red Deer density was higher at sites with detections on the camera than those where they weren't seen.
 
 ```{r siteSummary, warning = FALSE, message = FALSE}
-density_summary_table <- function(preds, model_data, species) {
+density_summary_table <- function(preds, model_data, species, species_index) {
   
-  cam_seen <- as.integer(as.logical(rowSums(model_data$n_obs)))
+  cam_seen <- as.integer(as.logical(rowSums(model_data$n_obs[,,species_index])))
   
   preds_sum <- preds %>% 
     st_drop_geometry() %>%
     mutate(`Species` = species,
            `CameraDetection` = cam_seen, 
-           `AnyDetection` = model_data$any_seen, 
+           `AnyDetection` = model_data$any_seen[species_index, ], 
            `Detection` = case_when(CameraDetection == 0 & AnyDetection == 0 ~ "Not seen", 
                                    CameraDetection == 0 & AnyDetection == 1 ~ "Only detected on transects", 
                                    CameraDetection == 1 & AnyDetection == 1 ~ "Seen on cameras")) %>%
@@ -598,10 +623,12 @@ density_summary_table <- function(preds, model_data, species) {
 }
 
 density_summary <- bind_rows(
-  density_summary_table(sambar_preds, model_data[[1]], species = "Sambar"),
-  density_summary_table(fallow_preds, model_data[[2]], species = "Fallow"),
-  density_summary_table(red_preds, model_data[[3]], species = "Red"),
-  density_summary_table(hog_preds, model_data[[4]], species = "Hog"))
+  density_summary_table(sambar_preds, multispecies_data, 
+                        species = "Sambar", species_index = 1),
+  density_summary_table(fallow_preds, multispecies_data, 
+                        species = "Fallow", species_index = 2),
+  density_summary_table(red_preds, multispecies_data, 
+                        species = "Red", species_index = 3))
 
 density_summary %>%
   kbl(format = "html", digits = 2) %>%
@@ -621,18 +648,23 @@ Using the model predictions ("pred") for all suitable public land we generate a 
 pred_raster_full <- terra::rast(prediction_raster)
 
 pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
-  stringr::str_remove_all(labels(terms(ab_formula_3)),
-                          "scale[(]|[)]|sqrt[(]"), 
+  stringr::str_remove_all(labels(terms(ab_formula_4)),
+                          "scale[(]|[)]|log[(]|sqrt[(]"), 
   pattern = "[*]", negate = T)]], mean)
 
 mean_raster <- list()
 mean_raster_discrete <- list()
 
-for(i in 1:length(model_fits)) {
+gp_preds_draws_all <- multispecies_model_zip_co$draws("pred", format = "matrix")
 
-gp_preds_draws_all <- model_fits[[i]]$draws("pred", format = "matrix")
+for(i in 1:length(deer_species_all)) {
 
-terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds_draws_all, 
+which_sp <- which(stringr::str_detect(string = colnames(gp_preds_draws_all),
+                                         pattern = paste0("pred\\[", species_index)))
+
+gp_preds_draws_sp <- gp_preds_draws_all[,which_sp]
+
+terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds_draws_sp, 
                                                                         2, 
                                                                         mean, 
                                                                         na.rm = T, 
@@ -660,7 +692,7 @@ names(combined_raster) <- c("Average Sambar Deer Density (per km2)",
                             "Average Red Deer Density (per km2)", 
                             "Average Hog Deer Density (per km2)")
 
-writeRaster(combined_raster, "outputs/rasters/combined_deer_average_density.tif", overwrite = T)
+# writeRaster(combined_raster, "outputs/rasters/combined_deer_average_density.tif", overwrite = T)
 ```
 
 ```{r PlotSave, fig.height=24, fig.width=8, fig.cap="Abundance of Sambar, Fallow, Red and Hog Deer across Victoria, dark-grey area reflects area not included in predictions (i.e. not public land)"}
@@ -1058,3 +1090,48 @@ marginal_effects_plot_cmd_all(all_me_data,
   theme_bw() +
   xlab("Covariate Value")
 ```
+
+# Relating abundance to vegetation. 
+
+
+```{r}
+density <- multispecies_zip_1$draws("N_site", format = "matrix")
+site_estimates <- list()
+site_density <- list()
+
+for(i in 1:n_site) {
+  site_estimates[[i]] <- character()
+  for(j in 1:length(deer_species_all)) {
+    site_estimates[[i]][j] <- paste0("N_site[", j, ",", i, "]")
+  }
+  site_density[[i]] <- sum(colMeans(density)[site_estimates[[i]]])
+}
+
+site_density_ul <- unlist(site_density)
+
+site_density_df <- cams_curated %>%
+  mutate(AllDeerDensity = site_density_ul, 
+         Bioregion = factor(multispecies_data$site_bioreg)) %>% 
+  filter(ProjectShortName == "StatewideDeer")
+
+ site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
+    dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(HerbaceousUnderstoryCover = NNWHUCover + ENWHUCover,
+                  SiteID = dplyr::case_when(SiteID == "47191" & CameraID == "HO04101053" ~ "47191A",
+                                            SiteID == "47191" & CameraID != "HO04101053" ~ "47191B",
+                                            TRUE ~ SiteID)) %>% # native + exotic herbaceous cover
+    dplyr::arrange(SiteID) %>%
+    as.data.frame()
+ 
+ site_density_df_joined <- site_density_df %>% 
+   left_join(site_vars)
+ 
+ library(brms)
+
+bform1 <- bf(mvbind(CanopyCov, Saplings, Seedlings, BGroundCover) ~ AllDeerDensity + (1|p|fosternest) + (1|q|dam)) +
+  set_rescor(TRUE)
+
+fit1 <- brm(bform1, data = BTdata, chains = 2, cores = 2)
+```
+
