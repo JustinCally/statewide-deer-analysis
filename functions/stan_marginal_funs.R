@@ -1,6 +1,12 @@
-marginal_effects_cmd <- function(draws, param, param_number, model_data, model_column, pwr = 1, log = FALSE, transition = FALSE, abundance = FALSE) {
+marginal_effects_cmd <- function(draws, param, param_number, model_data, model_column, pwr = 1, log = FALSE, transition = FALSE, abundance = FALSE, species_index = NULL) {
   require(data.table)
+  if(is.null(species_index)) {
   intercept = paste0(param, "[1]")
+  poi = paste0(param, "[", param_number, "]")
+  } else {
+    intercept = paste0(param, "[",species_index,",1]")
+    poi = paste0(param, "[",species_index, ",", param_number, "]")
+  }
   if(class(model_data[[model_column]]) == "factor") {
     levels <- length(levels(model_data[[model_column]]))
     sr <- c(1)
@@ -9,7 +15,6 @@ marginal_effects_cmd <- function(draws, param, param_number, model_data, model_c
     sr <- seq(from = -1, to = 1, by = 0.1)
     factor <- FALSE
   }
-  poi = paste0(param, "[", param_number, "]")
   model_draws <- draws[, c(intercept, poi)]
   # If predictors are scaled for occ just use intercept
   if(transition) {

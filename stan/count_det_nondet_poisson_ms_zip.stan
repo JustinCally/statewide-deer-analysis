@@ -329,7 +329,8 @@ for(n in 1:n_site) {
     if(any_seen[s,n] == 0) {
       if(bernoulli_rng(phi[s,n])==0)
          N_site[s,n] = 0;
-      log_p_unobs = log(phi[s,n]) + poisson_log_lpmf(0 | log_lambda_psi[s,n]);
+      log_p_unobs = log1m(phi[s,n]) + poisson_log_lpmf(0 | log_lambda_psi[s,n]);
+      //log_p_unobs = log(phi[s,n]) + poisson_log_lpmf(0 | log_lambda_psi[s,n]);
       if(bernoulli_rng(exp(log_p_unobs))==0)
         N_site_pred[s,n] = 0;
     }

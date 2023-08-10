@@ -100,6 +100,7 @@ posterior_checks_multispecies <- function(model, model_data, species_index,
                                           yrep = round(model_draws[,which_inc]),
                                           ...) +
       ggplot2::ggtitle(label = title) +
+      ggplot2::scale_x_continuous(trans = "sqrt") +
       ggplot2::theme_bw() +
       ggplot2::theme(legend.position = "top")
   } else {

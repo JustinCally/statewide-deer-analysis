@@ -206,21 +206,19 @@ for(n in 1:n_site) {
 // Royle-Nichols implementation in STAN (looping over possible discrete values of N)
 // https://discourse.mc-stan.org/t/royle-and-nichols/14150
 // https://discourse.mc-stan.org/t/identifiability-across-levels-in-occupancy-model/5340/2
-  for(s in 1:S) {
+    for(s in 1:S) {
 if (n_survey[n] > 0) {
-  array[n_max[n,s] - any_seen[s,n] + 1] real lp;
+  vector[n_max[n,s]] lp;
     if(any_seen[s,n] == 0){ // not seen
-      lp[1] = poisson_lpmf(0 | exp(log_lambda_psi[s,n]));
+      lp[1] = log_sum_exp(poisson_log_lpmf(0 | log_lambda_psi[s,n]), poisson_log_lpmf(1 | log_lambda_psi[s,n]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]));
+    } else {
+      lp[1] = poisson_log_lpmf(1 | log_lambda_psi[s,n]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
     }
-    else lp[1] = poisson_log_lpmf(1 | log_lambda_psi[s,n]) +
-    bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
-     // loop through possible values for maximum count (km2)
-    for (j in 2:(n_max[n,s] - any_seen[s,n] + 1)){
-      lp[j] = poisson_log_lpmf(any_seen[s,n] + j - 1 | log_lambda_psi[s,n])
-      + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | 1 - (1 - r[start_idx[n]:end_idx[n]])^(any_seen[s,n] + j - 1));
+    for (k in 2:n_max[n,s]){
+      lp[k] = poisson_log_lpmf(k | log_lambda_psi[s,n]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | 1-(1-r[start_idx[n]:end_idx[n]])^k);
     }
     lp_site[s,n] = log_sum_exp(lp);
-  } else {
+    } else {
     lp_site[s, n] = 0;
     }
   }
@@ -265,15 +263,15 @@ generated quantities {
   array[S, n_site, n_gs] real log_lik2;
   array[n_site, n_gs] real log_lik2_site;
   array[n_site] real log_lik;
-  array[S, n_site] real Site_lambda;
+  //array[S, n_site] real Site_lambda;
   real av_gs[S];
   array[S] simplex[n_gs] eps_gs_ave;
   array[S, npc] real pred;
-  array[S, npc] real pred_trunc;
+  //array[S, npc] real pred_trunc;
   array[S, np_reg] real Nhat_reg;
   // array[np_reg] real Nhat_reg_design;
   real Nhat[S];
-  real Nhat_trunc[S];
+  //real Nhat_trunc[S];
   real Nhat_sum;
   int trunc_counter[S];
   trunc_counter[S] = 0;
@@ -298,7 +296,7 @@ for(n in 1:n_site) {
     log_lik[n] = log_sum_exp(log_sum_exp(log_sum_exp(log_lik1[n,]),
     log_sum_exp(log_lik2_site[n,])), log_sum_exp(lp_site[,n]));
       for(s in 1:S) {
-    Site_lambda[s,n] = exp(log_lambda_psi[s,n]);
+    //Site_lambda[s,n] = exp(log_lambda_psi[s,n]);
     N_site[s,n] = sum(n_obs_true[s,n,]);
     N_site_pred[s,n] = sum(n_obs_pred[s,n,]);
       }
@@ -321,15 +319,13 @@ for(i in 1:np_reg) Nhat_reg[s,i] = 0;
 for(i in 1:npc) {
   pred[s,i] = poisson_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
   if(pred[s,i] > max(N_site[s,])) {
-    pred_trunc[s,i] = max(N_site[s,]);
+    //pred_trunc[s,i] = max(N_site[s,]);
     trunc_counter[s] += 1;
-  } else {
-    pred_trunc[s,i] = pred[s,i];
-  } // upper limit placed at highest site estimate
+  }
   Nhat_reg[s,pred_reg[i]] += pred[s,i];
 }
 Nhat[s] = sum(pred[s,]);
-Nhat_trunc[s] = sum(pred_trunc[s,]);
+//Nhat_trunc[s] = sum(pred_trunc[s,]);
 }
 Nhat_sum = sum(Nhat);
 }
