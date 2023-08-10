@@ -204,6 +204,10 @@ multispecies_data$keyfun <- 0 # 0 = HN
 multispecies_data$raw_data[is.na(multispecies_data$raw_data)] <- 0
 multispecies_data$transects[is.na(multispecies_data$transects)] <- 0
 
+evc_groups <- readRDS("data/evc_groups.rds")
+
+multispecies_data <- c(multispecies_data, evc_groups)
+
 saveRDS(multispecies_data, "data/multispecies_data.rds")
 } else {
   multispecies_data <- readRDS("data/multispecies_data.rds")
@@ -238,14 +242,16 @@ These are the models used in the analysis. The first is an integrated model that
 ```{r models, echo = FALSE, warning=FALSE}
 model_poisson_ms <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms.stan"))
 model_poisson_ms_zip <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms_zip.stan"))
+model_poisson_ms_zip_evc <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms_zip_evc.stan"))
 ```
 
 ```{r, eval = FALSE}
+### Normal ZIP
 multispecies_data$keyfun <- 0
 
 multispecies_model_zip <- model_poisson_ms_zip$sample(data = multispecies_data, 
-                                                chains = 8,
-                                 parallel_chains = 8, 
+                                                chains = 6,
+                                 parallel_chains = 6, 
                                  init = 0.1, 
                                  max_treedepth = 10, 
                                  refresh = 20, 
@@ -255,6 +261,8 @@ multispecies_model_zip <- model_poisson_ms_zip$sample(data = multispecies_data,
                                  iter_warmup = 200)
 
 multispecies_model_zip$save_object("outputs/models/multispecies_model_zip.rds")
+
+### No ZIP
 
 multispecies_model <- model_poisson_ms$sample(data = multispecies_data, 
                                                 chains = 8,
@@ -268,6 +276,19 @@ multispecies_model <- model_poisson_ms$sample(data = multispecies_data,
                                  iter_warmup = 200)
 
 multispecies_model$save_object("outputs/models/multispecies_model.rds")
+
+### EVC ZIP 
+
+multispecies_model_zip_evc <- model_poisson_ms_zip_evc$sample(data = multispecies_data, 
+                                                chains = 4,
+                                 parallel_chains = 4, 
+                                 init = 0.1, 
+                                 max_treedepth = 10, 
+                                 refresh = 20, 
+                                 show_messages = TRUE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = 200, 
+                                 iter_warmup = 200)
 ```
 
 ## Fit models

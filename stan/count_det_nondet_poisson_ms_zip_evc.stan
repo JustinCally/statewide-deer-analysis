@@ -101,6 +101,10 @@ data {
   int<lower=1> np_reg;
   int<lower=1> site_reg[n_site];
   int<lower=1> pred_reg[npc];
+  // evc data
+  int<lower=1> np_evc;
+  int<lower=1> site_evc[n_site];
+  int<lower=1> pred_evc[npc];
 
   // key function, 0 = halfnorm
   int keyfun;
@@ -132,6 +136,8 @@ parameters {
   // bioregion RE
   // array[S] real<lower=0> bioregion_sd;
   // array[S] vector[np_bioreg] bioregion_raw;
+  array[S] real<lower=0> evc_sd;
+  array[S] vector[np_evc] evc_raw;
   // bioregion RE ZIP
   array[S] real bioregion_mu_zip;
   array[S] real<lower=0> bioregion_sd_zip;
@@ -146,6 +152,7 @@ transformed parameters {
   // random effects
   // array[S] vector[np_bioreg] eps_bioregion; // bioregion random effect
   array[S] vector[np_bioreg] eps_bioregion_zip; // bioregion random effect
+  array[S] vector[np_evc] eps_evc; // bioregion random effect
   // distance parameters
   array[n_site] real log_sigma;
   array[n_site] real sigma;
@@ -176,6 +183,9 @@ for(b in 1:np_bioreg) {
     // eps_bioregion[s,b] = bioregion_sd[s] * bioregion_raw[s,b];
     eps_bioregion_zip[s,b] = bioregion_mu_zip[s] + bioregion_sd_zip[s] * bioregion_raw_zip[s,b];
   }
+for(k in 1:np_evc) {
+  eps_evc[s,k] = evc_sd[s] * evc_raw[s,k];
+}
   }
 
 for(n in 1:n_site) {
@@ -198,7 +208,7 @@ for(n in 1:n_site) {
   logit_phi[s,n] = eps_bioregion_zip[s,site_bioreg[n]];
   phi[s,n] = inv_logit(logit_phi[s,n]);
 
-  log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s]; // + eps_bioregion[s,site_bioreg[n]];
+  log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s] + eps_evc[s,site_evc[n]]; // + eps_bioregion[s,site_bioreg[n]];
 
   for(j in 1:n_gs) {
     eps_site[s, n,j] = grp_sd[s] * eps_raw[s,n,j];
@@ -247,6 +257,10 @@ model {
     beta_psi[s] ~ normal(0, 1); // prior for poisson model
     // bioregion_sd[s] ~ student_t(4, 0, 1);
     // bioregion_raw[s,] ~ normal(0,1);
+    // evc re
+    evc_sd[s] ~ student_t(4, 0, 1);
+    evc_raw[s,] ~ normal(0,1);
+    // bioregion re
     bioregion_mu_zip[s] ~ normal(0,2);
     bioregion_sd_zip[s] ~ student_t(4, 0, 1);
     bioregion_raw_zip[s,] ~ normal(0,1);
@@ -356,7 +370,7 @@ for(i in 1:np_reg) Nhat_reg[s,i] = 0;
 
 for(i in 1:npc) {
   if(bernoulli_logit_rng(eps_bioregion_zip[s, pred_bioreg[i]]) == 1) {
-  pred[s,i] = poisson_log_rng(X_pred_psi[i,] * beta_psi[s]) * prop_pred[i] * av_gs[s]; //offset
+  pred[s,i] = poisson_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_evc[s, pred_evc[i]]) * prop_pred[i] * av_gs[s]; //offset
   } else {
     pred[s,i] = 0;
   }
