@@ -32,3 +32,11 @@ data/coastline/dist_coast_me/metadata.xml
 data/coastline/dist_coast_me/sta.adf
 data/coastline/dist_coast_me/w001001.adf
 data/coastline/dist_coast_me/w001001x.adf
+data/landcover/2017_TDLC_smoothed_urbanmasked_class.tif
+data/landcover/2017_TDLC_smoothed_urbanmasked_class.tif.aux.xml
+data/landcover/2017_TDLC_smoothed_urbanmasked_class.tif.clr
+data/landcover/2017_TDLC_smoothed_urbanmasked_class.tif.ovr
+data/landcover/2017_TDLC_smoothed_urbanmasked_class.tif.ovr.aux.xml
+data/landcover/PDLC_smoothed.tif.lyr
+data/landcover/SDLC_smoothed.tif.lyr
+data/landcover/TDLC_smoothed.tif.lyr

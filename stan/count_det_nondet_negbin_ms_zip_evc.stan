@@ -146,6 +146,11 @@ parameters {
   array[S] vector[n_gs] zeta;
   array[S] matrix[n_site, n_gs] eps_raw;
   array[S] real<lower=0> grp_sd;
+  // od
+  array[S] real od_mu;
+  real<lower=0> od_sd;
+  array[S] vector[np_bioreg] od_raw;
+
 }
 
 transformed parameters {
@@ -177,10 +182,12 @@ transformed parameters {
   real<lower=0> theta = exp(log_theta);
   array[S] vector[n_site] logit_phi;
   array[S] vector<lower=0, upper=1>[n_site] phi;
+  array[S] vector[np_bioreg] od; // bioregion random effect
 
   for(s in 1:S) {
 for(b in 1:np_bioreg) {
     // eps_bioregion[s,b] = bioregion_sd[s] * bioregion_raw[s,b];
+    od[s,b] = exp(od_mu[s] + od_sd * od_raw[s,b]);
     eps_bioregion_zip[s,b] = bioregion_mu_zip[s] + bioregion_sd_zip[s] * bioregion_raw_zip[s,b];
   }
 for(k in 1:np_evc) {
@@ -254,8 +261,11 @@ model {
     // bioregion_sd[s] ~ student_t(4, 0, 1);
     // bioregion_raw[s,] ~ normal(0,1);
     // evc re
-    evc_sd[s] ~ normal(0,0.5);
+    evc_sd[s] ~ normal(0,1);
     evc_raw[s,] ~ normal(0,1);
+    // od
+    od_mu[s] ~ normal(0,1);
+    od_raw[s,] ~ normal(0,1);
     // bioregion re
     bioregion_mu_zip[s] ~ normal(0,2);
     bioregion_sd_zip[s] ~ student_t(4, 0, 1);
@@ -264,6 +274,7 @@ model {
     grp_sd[s] ~ normal(0, 1);
     zeta[s,] ~ normal(0, 2);
   }
+  od_sd ~ normal(0,1);
   beta_trans_det ~ normal(0, 2); // beta for transect detection
   beta_det ~ normal(0, 4); // prior for sigma
   activ ~ beta(bshape, bscale);  //informative prior
@@ -274,10 +285,10 @@ model {
   for(s in 1:S) {
   if(any_seen[s,n] > 0) {
       target += bernoulli_lpmf(1 | phi[s,n]) +
-        poisson_lpmf(n_obs[n,j,s] | lambda[s,n,j]);
+        neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s, site_bioreg[n]]);
   } else {
       target += log_sum_exp(bernoulli_lpmf(0 | phi[s,n]), bernoulli_lpmf(1 | phi[s,n]) +
-      poisson_lpmf(n_obs[n,j,s] | lambda[s,n,j]));
+      neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s, site_bioreg[n]]));
   }
         }
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
@@ -320,9 +331,9 @@ for(n in 1:n_site) {
   for(j in 1:n_gs) {
   log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
   for(s in 1:S) {
-  log_lik2[s,n,j] = poisson_lpmf(n_obs[n,j,s] | lambda[s,n,j]); //for loo
-  n_obs_true[s, n, j] = gs[j] * (poisson_log_rng(log_lambda_psi[s,n] + log(eps_ngs[s,n,j])));
-  n_obs_pred[s, n, j] = gs[j] * poisson_rng(lambda[s,n,j]);
+  log_lik2[s,n,j] = neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s, site_bioreg[n]]); //for loo
+  n_obs_true[s, n, j] = gs[j] * (neg_binomial_2_log_rng(log_lambda_psi[s,n] + log(eps_ngs[s,n,j]), od[s, site_bioreg[n]]));
+  n_obs_pred[s, n, j] = gs[j] * neg_binomial_2_rng(lambda[s,n,j], od[s, site_bioreg[n]]);
   }
   log_lik2_site[n, j] = log_sum_exp(log_lik2[,n,j]);
     }
@@ -366,7 +377,7 @@ for(i in 1:np_reg) Nhat_reg[s,i] = 0;
 
 for(i in 1:npc) {
   if(bernoulli_logit_rng(eps_bioregion_zip[s, pred_bioreg[i]]) == 1) {
-  pred[s,i] = poisson_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_evc[s, pred_evc[i]]) * prop_pred[i] * av_gs[s]; //offset
+  pred[s,i] = neg_binomial_2_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_evc[s, pred_evc[i]], od[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
   } else {
     pred[s,i] = 0;
   }

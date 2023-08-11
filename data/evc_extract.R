@@ -17,13 +17,13 @@ evc_joined <- cams_curated_buffer %>%
 
 # bioreg - evc codes
 evc_joined_mutate <- evc_joined %>%
-  mutate(BIOEVC = paste(BIOREGION, X_EVCNAME, sep = " || ")) %>%
+  mutate(BIOEVC = paste(XGROUPNAME, sep = " || ")) %>%
   arrange(BIOEVC) %>%
   mutate(BIOEVCLVL = as.integer(as.factor(BIOEVC)))
 
 # evc data all
 evc_data_all <- evc_data_valid %>%
-  mutate(BIOEVC = paste(BIOREGION, X_EVCNAME, sep = " || "))
+  mutate(BIOEVC = paste(XGROUPNAME, sep = " || "))
 
 # filter to sampled areas
 evc_data_filtered <- evc_data_all %>%
@@ -31,12 +31,12 @@ evc_data_filtered <- evc_data_all %>%
   arrange(BIOEVC) %>%
   mutate(BIOEVCLVL = as.integer(as.factor(BIOEVC)))
 
+pred_raster_full <- terra::rast(prediction_raster)
 
 pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
-  stringr::str_remove_all(labels(terms(ab_formula_2)),
-                          "scale[(]|[)]|sqrt[(]"),
+  stringr::str_remove_all(labels(terms(ab_formula_4)),
+                          "scale[(]|[)]|log[(]|sqrt[(]"),
   pattern = "[*]", negate = T)]], mean)
-
 
 vic_model_data_resampled_df <- terra::as.data.frame(pred_raster, xy = TRUE, cell = TRUE, na.rm = TRUE)
 
@@ -48,10 +48,10 @@ evc_groups <- list()
 evc_groups[["pred_evc"]] <- evc_data_filtered$BIOEVCLVL[pred_evc_lvl_i]
 evc_groups[["site_evc"]] <- evc_joined_mutate$BIOEVCLVL
 evc_groups[["np_evc"]] <- length(unique(evc_groups[["site_evc"]]))
-saveRDS(evc_groups, "data/evc_groups.rds")
+saveRDS(evc_groups, "data/evc_groupnames.rds")
 
-for(i in 1:length(model_data)) {
-  model_data[[i]]$np_evc <- evc_groups[["np_evc"]]
-  model_data[[i]]$pred_evc <- evc_groups[["pred_evc"]]
-  model_data[[i]]$site_evc <- evc_groups[["site_evc"]]
-}
+# for(i in 1:length(model_data)) {
+#   model_data[[i]]$np_evc <- evc_groups[["np_evc"]]
+#   model_data[[i]]$pred_evc <- evc_groups[["pred_evc"]]
+#   model_data[[i]]$site_evc <- evc_groups[["site_evc"]]
+# }

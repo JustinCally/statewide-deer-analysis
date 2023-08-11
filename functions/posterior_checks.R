@@ -84,7 +84,7 @@ posterior_checks_multispecies <- function(model, model_data, species_index,
   which_sp <- which(stringr::str_detect(string = colnames(model_draws),
                                          pattern = paste0("N_site_pred\\[", species_index)))
 
-  model_draws <- model_draws[,which_sp]
+  model_draws <- model_draws[,which_sp] %>% na.omit()
 
   if(identical(stat, ppc_scatter_avg)) {
     ppc_plots <- bayesplot::ppc_scatter_avg(n_obs_totals[which_inc],

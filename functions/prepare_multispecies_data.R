@@ -1,4 +1,3 @@
-# Prepare Data Function
 
 prepare_model_data_multispecies <- function(species,
                                projects,
@@ -17,7 +16,8 @@ prepare_model_data_multispecies <- function(species,
                                hs_df_global,
                                hs_scale_global, # ratio of expected non-zero to zero divided by total observation as per brms convention
                                hs_scale_slab,
-                               hs_df_slab) {
+                               hs_df_slab,
+                               filter_behaviour = TRUE) {
 
   if(species[1] == "All deer") {
     species <- c("Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
@@ -61,8 +61,8 @@ prepare_model_data_multispecies <- function(species,
                                               Distance == "999" ~ NA_character_,
                                               TRUE ~ Distance)) %>%
     dplyr::ungroup() %>%
-    dplyr::filter(Time_n %% snapshot_interval == 0 & #& #snapshot moment interval of 2s
-                    is.na(Behaviour)) %>% # filter out behaviors such as camera or marker interaction
+    dplyr::filter(Time_n %% snapshot_interval == 0) %>% #& #snapshot moment interval of 2s
+    {if(filter_behaviour) dplyr::filter(is.na(Behaviour)) else .} %>% # filter out behaviors such as camera or marker interaction
     dplyr::group_by(SiteID, Time_n, Species) %>%
     dplyr::slice(1) %>% # if two photos occur in one second take only one (snapshot moment = 2)
     dplyr::ungroup()
