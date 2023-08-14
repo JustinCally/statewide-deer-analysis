@@ -34,7 +34,7 @@ evc_data_filtered <- evc_data_all %>%
 pred_raster_full <- terra::rast(prediction_raster)
 
 pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
-  stringr::str_remove_all(labels(terms(ab_formula_4)),
+  stringr::str_remove_all(labels(terms(ab_formula_1)),
                           "scale[(]|[)]|log[(]|sqrt[(]"),
   pattern = "[*]", negate = T)]], mean)
 
@@ -45,6 +45,7 @@ pred_evc_lvl_i <-  vic_model_data_resampled_df %>%
   sf::st_nearest_feature(evc_data_filtered %>% st_transform(3111))
 
 evc_groups <- list()
+evc_groups[["site_EVCGROUP"]] <- evc_joined_mutate %>% select(BIOEVCLVL, BIOEVC) %>% st_drop_geometry() %>% distinct()
 evc_groups[["pred_evc"]] <- evc_data_filtered$BIOEVCLVL[pred_evc_lvl_i]
 evc_groups[["site_evc"]] <- evc_joined_mutate$BIOEVCLVL
 evc_groups[["np_evc"]] <- length(unique(evc_groups[["site_evc"]]))

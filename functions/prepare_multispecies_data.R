@@ -62,7 +62,7 @@ prepare_model_data_multispecies <- function(species,
                                               TRUE ~ Distance)) %>%
     dplyr::ungroup() %>%
     dplyr::filter(Time_n %% snapshot_interval == 0) %>% #& #snapshot moment interval of 2s
-    {if(filter_behaviour) dplyr::filter(is.na(Behaviour)) else .} %>% # filter out behaviors such as camera or marker interaction
+    {if(filter_behaviour) dplyr::filter(., is.na(.data[["Behaviour"]])) else .} %>% # filter out behaviors such as camera or marker interaction
     dplyr::group_by(SiteID, Time_n, Species) %>%
     dplyr::slice(1) %>% # if two photos occur in one second take only one (snapshot moment = 2)
     dplyr::ungroup()

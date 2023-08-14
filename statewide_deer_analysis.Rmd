@@ -153,16 +153,12 @@ transect_formula <- ~Survey
 #### Abundance Formula Options #### 
 ab_formula_1 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(BIO15) + scale(sqrt(ForestEdge)) + 
   scale(sqrt(MRVBF)) + scale(sqrt(SLOPE)) + scale(sqrt(NonPhotosyntheticVeg))
-# Simple Formula
-ab_formula_2 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(TreeDensity) + scale(sqrt(ForestEdge))
 
-# Simple with Coastal Distance: Hog Deer
-ab_formula_3 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(TreeDensity) + scale(sqrt(ForestEdge)) + scale(dist_coast) 
+ab_formula_2 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(BIO15) + scale(sqrt(ForestEdge)) + scale(sqrt(MRVBF)) 
 
-ab_formula_4 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(BIO15) + scale(sqrt(ForestEdge)) + scale(TreeDensity) + scale(TreeDensity^2)
+ab_formula_3 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(BIO15) + scale(sqrt(ForestEdge)) 
 
-ab_formula_5 <- ~ scale(sqrt(BareSoil)) + scale(sqrt(Nitrogen)) + scale(log(PastureDistance)) + scale(BIO15) + scale(sqrt(ForestEdge)) + 
-  scale(sqrt(MRVBF)) 
+ab_formula_4 <- ~ 1
 
 #### Detection Formula: Distance-sampling ####
 det_formula <- ~ scale(HerbaceousUnderstoryCover) # average detection across all sites #scale(HerbaceousUnderstoryCover)
@@ -179,13 +175,13 @@ Using the `prepare_model_data()` function we generate the data for the `STAN` mo
 
 ```{r ModelData}
 if(!file.exists("data/multispecies_data.rds")) {
-multispecies_data_f <- prepare_model_data_multispecies(species = c("Cervus unicolor", 
+multispecies_data <- prepare_model_data_multispecies(species = c("Cervus unicolor", 
                                                                  "Dama dama", 
                                                                  "Cervus elaphus"),
                                  projects = project_short_name,
                      buffer = spatial_buffer,
                      detection_formula = det_formula,
-                     abundance_formula = ab_formula_4,
+                     abundance_formula = ab_formula_1,
                      transect_formula = transect_formula,
                      con = con,
                      raster_dir = raster_files,
@@ -198,7 +194,7 @@ multispecies_data_f <- prepare_model_data_multispecies(species = c("Cervus unico
                      hs_df_global = 1,
                      hs_scale_global = 1, 
                      hs_scale_slab = 0.5,
-                     hs_df_slab = 4, filter_behaviour = FALSE)
+                     hs_df_slab = 4, filter_behaviour = TRUE)
 
 multispecies_data$keyfun <- 0 # 0 = HN
 multispecies_data$raw_data[is.na(multispecies_data$raw_data)] <- 0
@@ -208,7 +204,7 @@ evc_groups <- readRDS("data/evc_groupnames.rds")
 
 multispecies_data <- c(multispecies_data, evc_groups)
 
-saveRDS(multispecies_data, "data/multispecies_data_evc_group.rds")
+saveRDS(multispecies_data, "data/multispecies_data.rds")
 } else {
   multispecies_data <- readRDS("data/multispecies_data.rds")
 }
@@ -216,7 +212,7 @@ saveRDS(multispecies_data, "data/multispecies_data_evc_group.rds")
 
 # Model Execution
 
-## Model settings
+## MCMC settings
 
 Below we list the MCMC setting for our model. We run models on eight parallel chains for 1,000 iterations each (300 warmup and 300 sampling). These setting provide us with 4,000 posterior draws (8 x 500).
 
@@ -227,133 +223,86 @@ nw <- 200 # warmup iterations
 nc <- 8 # number of chains
 ```
 
+## Model Options  
+
+We generate a set of models to evaluate against one another:
+
+```{r ModelScope}
+#Models to run 
+models_to_run <- data.frame(formula = c("ab_formula_1", 
+                                        "ab_formula_2",
+                                        "ab_formula_3",
+                                        "ab_formula_4",  
+                                        "ab_formula_3",
+                                        "ab_formula_3"), 
+                            keyfun = c(0,0,0,0,1,0), 
+                            evc = c(F,F,F,F,F,T))
+```
+
+
 ## Read in Models
 
 These are the models used in the analysis. The first is an integrated model that requires transect and camera data. The second is a count-only model that just requires the camera data.
 
-```{cmdstan, file = "stan/count_det_nondet_poisson_ms.stan", output.var = "model_poisson_ms", eval = FALSE}
+```{cmdstan, file = "stan/count_det_nondet_negbin_ms.stan", output.var = "model_negbin_ms", eval = FALSE}
 
 ```
 
-```{cmdstan, file = "stan/count_det_nondet_poisson_ms_zip.stan", output.var = "model_poisson_ms_zip", eval = FALSE}
+```{cmdstan, file = "stan/count_det_nondet_negbin_ms_evc.stan", output.var = "model_negbin_ms_evc", eval = FALSE}
 
 ```
 
 ```{r models, echo = FALSE, warning=FALSE}
-model_poisson_ms <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms.stan"))
-model_poisson_ms_zip <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms_zip.stan"))
-model_poisson_ms_zip_evc <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms_zip_evc.stan"))
-model_negbin_ms_zip_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_zip_evc.stan"))
-
 model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"))
-model_negbin_ms2 <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms2.stan"))
-```
-
-```{r, eval = FALSE}
-### Normal ZIP
-multispecies_data$keyfun <- 0
-
-multispecies_model_zip <- model_poisson_ms_zip$sample(data = multispecies_data, 
-                                                chains = 6,
-                                 parallel_chains = 6, 
-                                 init = 0.1, 
-                                 max_treedepth = 10, 
-                                 refresh = 20, 
-                                 show_messages = TRUE,
-                                 save_warmup = FALSE,
-                                 iter_sampling = 200, 
-                                 iter_warmup = 200)
-
-multispecies_model_zip$save_object("outputs/models/multispecies_model_zip.rds")
-
-### No ZIP
-
-multispecies_model <- model_poisson_ms$sample(data = multispecies_data, 
-                                                chains = 8,
-                                 parallel_chains = 8, 
-                                 init = 0.1, 
-                                 max_treedepth = 10, 
-                                 refresh = 20, 
-                                 show_messages = TRUE,
-                                 save_warmup = FALSE,
-                                 iter_sampling = 200, 
-                                 iter_warmup = 200)
-
-multispecies_model$save_object("outputs/models/multispecies_model.rds")
-
-### EVC ZIP 
-
-multispecies_model_negbin <- model_negbin_ms$sample(data = multispecies_data, 
-                                                chains = 6,
-                                 parallel_chains = 6, 
-                                 init = 0.1, 
-                                 max_treedepth = 10, 
-                                 refresh = 20, 
-                                 # adapt_delta = 0.999,
-                                 # step_size = 0.01,
-                                 show_messages = TRUE,
-                                 save_warmup = FALSE,
-                                 iter_sampling = 80, 
-                                 iter_warmup = 80)
-
-multispecies_model_negbin2 <- model_negbin_ms2$sample(data = multispecies_data, 
-                                                chains = 4,
-                                 parallel_chains = 4, 
-                                 init = 0.1, 
-                                 max_treedepth = 10, 
-                                 refresh = 20, 
-                                 # adapt_delta = 0.999,
-                                 # step_size = 0.01,
-                                 show_messages = TRUE,
-                                 save_warmup = FALSE,
-                                 iter_sampling = 80, 
-                                 iter_warmup = 80)
-
-multispecies_model_negbin_zip_evc$save_object("outputs/models/multispecies_model_negbin_zip_evc.rds")
+model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
 ```
 
 ## Fit models
 
 We can fit models using `cmdstanr`. Here we fit models using a poisson distribution. To aid convergence `adapt_delta` is increased from the default value. The models we compare are:
 
--   Model with key abundance covariates and half-normal detection function
+-   Model with several key abundance covariates and half-normal detection function
 -   Model with key abundance covariates and hazard-rate detection function
 -   Null-model (bioregion only) with half-normal detection function
+-  Model with key abundance covariates, bioregion random-effect and an evc group random effect.  
 
 ```{r FitModels, eval = FALSE}
-integrated_model <- c(TRUE, TRUE, TRUE, FALSE)
-distributions <- c("poisson")
 model_fits <- list()
 
-for(j in 1:length(distributions)) {
+for(i in 1:nrow(models_to_run)) {
 
-  for(i in 1:length(deer_species_all)) {
-
-  if(integrated_model[i]) {
-    model_to_fit <- get(paste0("model_", distributions[j]))
+  if(models_to_run$evc[i]) {
+    model_to_fit <- model_negbin_ms_evc
   } else {
-    model_to_fit <- get(paste0("model_", distributions[j], "_co"))
+    model_to_fit <- model_negbin_ms
   }
+  
+  form_to_use <- get(models_to_run$formula[i])
+  
+  params_to_use <- c(TRUE, labels(terms(ab_formula_1)) %in% labels(terms(form_to_use)))
+  
+  data_to_use <- multispecies_data
+  
+  data_to_use$X_psi <- data_to_use$X_psi[,params_to_use]
+  data_to_use$X_pred_psi <- data_to_use$X_pred_psi[,params_to_use]
+  data_to_use$m_psi <- length(params_to_use)
+  
+  data_to_use$keyfun <- models_to_run$keyfun[i]
 
-  model_fits[[i]] <- model_to_fit$sample(data = model_data[[i]],
+  model_fits[[i]] <- model_to_fit$sample(data = data_to_use,
                                          chains = nc,
                                  parallel_chains = nc, 
                                  init = 0.1, 
                                  max_treedepth = 10, 
-                                 refresh = 20, 
-                                 step_size = 0.01, 
-                                 adapt_delta = 0.99,
-                                 show_messages = TRUE,
+                                 refresh = 25, 
+                                 show_messages = FALSE,
                                  save_warmup = FALSE,
                                  iter_sampling = ni, 
                                  iter_warmup = nw)
 
-  model_fits[[i]]$save_object(paste0("outputs/models/fit_", 
-                                     distributions[j], 
-                                     "_", 
-                                     deer_species_all[i],".rds"))
+  model_fits[[i]]$save_object(paste0("outputs/models/fit_multispecies_", 
+                                     i,".rds"))
 
-  }
   
 }
 ```
@@ -444,7 +393,7 @@ cowplot::plot_grid(plotlist = ppc_fallow, labels = "AUTO", ncol = 2)
 ppc_red <- list()
 
 for(i in 1:length(funs)) {
-ppc_red[[i]] <- posterior_checks_multispecies(model = multispecies_model_negbin_zip_evc, 
+ppc_red[[i]] <- posterior_checks_multispecies(model = multispecies_model_negbin, 
                  model_data = multispecies_data, species_index = 3,
                  stat = funs[[i]], integrated = T,
                  title = titles[i])
@@ -508,9 +457,9 @@ return(plot)
   
 }
 
-sambar_preds <- site_preds(multispecies_model_zip, cams_curated = cams_curated, species_index = 1)
-fallow_preds <- site_preds(multispecies_model_zip, cams_curated = cams_curated, species_index = 2)
-red_preds <- site_preds(multispecies_model_zip, cams_curated = cams_curated, species_index = 3)
+sambar_preds <- site_preds(multispecies_model_negbin, cams_curated = cams_curated, species_index = 1)
+fallow_preds <- site_preds(multispecies_model_negbin, cams_curated = cams_curated, species_index = 2)
+red_preds <- site_preds(multispecies_model_negbin, cams_curated = cams_curated, species_index = 3)
 
 cowplot::plot_grid(site_density_plot(sambar_preds, vic_regions, species = "Sambar"),
 site_density_plot(fallow_preds, vic_regions, species = "Fallow"),
@@ -575,7 +524,7 @@ pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
 mean_raster <- list()
 mean_raster_discrete <- list()
 
-gp_preds_draws_all <- multispecies_model_zip$draws("pred", format = "matrix")
+gp_preds_draws_all <- multispecies_model_negbin$draws("pred", format = "matrix")
 
 for(i in 1:length(deer_species_all)) {
 
@@ -588,7 +537,7 @@ terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds
                                                                         2, 
                                                                         mean, 
                                                                         na.rm = T, 
-                                                                        trim = 0.1)
+                                                                        trim = 0.01)
 
 mean_raster[[i]] <- pred_raster
 mean_raster_discrete[[i]] <- mean_raster[[i]]
@@ -705,9 +654,9 @@ abundance_table <- function(model, regions, pred_area, caption, species_index) {
     kableExtra::row_spec(7, background = "#c2a5cf", color = "black", bold = T, hline_after = T)
 }
 
-abundance_table(multispecies_model_zip, regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Sambar Deer Density", species_index = 1)
-abundance_table(multispecies_model_zip, regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Fallow Deer Density", species_index = 2)
-abundance_table(multispecies_model_zip, regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Red Deer Density", species_index = 3)
+abundance_table(multispecies_model_negbin, regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Sambar Deer Density", species_index = 1)
+abundance_table(multispecies_model_negbin, regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Fallow Deer Density", species_index = 2)
+abundance_table(multispecies_model_negbin, regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Red Deer Density", species_index = 3)
 ```
 
 # Model Covariates
@@ -728,7 +677,7 @@ Below we show the average detection rate for a given group of deer in front of t
 
 ```{r AverageDetectionRates}
 
-det_rates <- multispecies_model_zip$summary("p") %>%
+det_rates <- multispecies_model_negbin$summary("p") %>%
   mutate(var = stringr::str_extract(variable, "(?<=\\[).+?(?=\\])")) %>%
   separate(var, into = c("site", "Group Size"), sep = ",")
 
@@ -828,7 +777,7 @@ For Sambar, Fallow and Red Deer we were able to estimate detection rates of the 
 
 ```{r detectionplots, fig.width=8, fig.height=5, fig.cap="Detection Probability for the various methods of survey. Camera trap detection probability is based on average deployment length, while transects are based on 3 independent transect searches"}
   
-all_draws <- multispecies_model_zip$draws("beta_trans_det", format = "df")
+all_draws <- multispecies_model_negbin$draws("beta_trans_det", format = "df")
 
 # det_marginal_effects <- list()
 # det_plot <- list()
