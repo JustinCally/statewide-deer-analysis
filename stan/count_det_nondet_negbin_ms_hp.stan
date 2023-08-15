@@ -101,11 +101,6 @@ data {
   int<lower=1> np_reg;
   int<lower=1> site_reg[n_site];
   int<lower=1> pred_reg[npc];
-  // evc data
-  int<lower=1> np_evc;
-  int<lower=1> site_evc[n_site];
-  int<lower=1> pred_evc[npc];
-
 
   // key function, 0 = halfnorm
   int keyfun;
@@ -137,16 +132,13 @@ parameters {
   // bioregion RE
   array[S] real<lower=0> bioregion_sd;
   array[S] vector[np_bioreg] bioregion_raw;
-  // evc RE
-  real<lower=0> evc_sd;
-  array[S] vector[np_evc] evc_raw;
   // eps group size params
   array[S] vector[n_gs] zeta;
   array[S] matrix[n_site, n_gs] eps_raw;
   array[S] real<lower=0> grp_sd;
   // od
-  array[S] real od_mu;
-  array[S] real<lower=0> od_sd;
+  real od_mu;
+  real<lower=0> od_sd;
   array[S] vector[np_bioreg] od_raw;
   real odRNmu;
 }
@@ -154,7 +146,6 @@ parameters {
 transformed parameters {
   // random effects
   array[S] vector[np_bioreg] eps_bioregion; // bioregion random effect
-  array[S] vector[np_evc] eps_evc; // bioregion random effect
   // distance parameters
   array[n_site] real log_sigma;
   array[n_site] real sigma;
@@ -184,12 +175,11 @@ transformed parameters {
   for(s in 1:S) {
     for(b in 1:np_bioreg) {
     eps_bioregion[s,b] = bioregion_sd[s] * bioregion_raw[s,b];
-    od[s,b] = exp(od_mu[s] + od_sd[s] * od_raw[s,b]);
+    od[s,b] = exp(od_mu + od_sd * od_raw[s,b]);
   }
-  for(k in 1:np_evc) {
-  eps_evc[s,k] = evc_sd * evc_raw[s,k];
-}
   }
+
+
 
 for(n in 1:n_site) {
   log_sigma[n] = det_model_matrix[n,] * beta_det;
@@ -210,16 +200,16 @@ for(n in 1:n_site) {
   vector[n_max[n,s]+1] Nlik;
   vector[n_max[n,s]+1] gN;
   vector[n_max[n,s]+1] pcond;
-  log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s] + eps_bioregion[s,site_bioreg[n]] + eps_evc[s,site_evc[n]];
+  log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s] + eps_bioregion[s,site_bioreg[n]];
 
   for(j in 1:n_gs) {
     eps_site[s, n,j] = grp_sd[s] * eps_raw[s,n,j];
     epsi[s,n,j] = exp(zeta[s,j] + eps_site[s,n,j]);
   }
-
   eps_ngs[s,n,] = epsi[s,n,]/sum(epsi[s,n,]);
 
   // p-bar
+
   for(k in 1:(n_max[n,s]+1))
     Nlik[k] = exp(neg_binomial_2_log_lpmf(k-1 | log_lambda_psi[s,n], odRN));
 
@@ -273,13 +263,10 @@ model {
     grp_sd[s] ~ normal(0, 1);
     zeta[s,] ~ normal(0, 2);
     // od
-    od_sd[s] ~ normal(0,1);
-    od_mu[s] ~ normal(0,1);
     od_raw[s,] ~ normal(0,1);
-    // evc re
-    evc_raw[s,] ~ normal(0,1);
   }
-  evc_sd ~ normal(0,1);
+  od_sd ~ normal(0,1);
+  od_mu ~ normal(0,1);
   odRNmu ~ normal(0,1);
   beta_trans_det ~ normal(0, 2); // beta for transect detection
   beta_det ~ normal(0, 4); // prior for sigma
@@ -363,7 +350,7 @@ for(s in 1:S) {
 for(i in 1:np_reg) Nhat_reg[s,i] = 0;
 
 for(i in 1:npc) {
-  pred[s,i] = neg_binomial_2_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]] + eps_evc[s, pred_evc[i]], od[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
+  pred[s,i] = neg_binomial_2_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]], od[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
   if(pred[s,i] > max(N_site[s,])) {
     //pred_trunc[s,i] = max(N_site[s,]);
     trunc_counter[s] += 1;

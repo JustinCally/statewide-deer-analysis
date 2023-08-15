@@ -170,6 +170,7 @@ transformed parameters {
   real<lower=0> theta = exp(log_theta);
   array[S] vector[np_bioreg] od; // bioregion random effect
   real odRN = exp(odRNmu);  // bioregion random effect
+  array[S, n_site] real<lower=0, upper=1> pbar;
 
   for(s in 1:S) {
     for(b in 1:np_bioreg) {
@@ -177,6 +178,8 @@ transformed parameters {
     od[s,b] = exp(od_mu[s] + od_sd[s] * od_raw[s,b]);
   }
   }
+
+
 
 for(n in 1:n_site) {
   log_sigma[n] = det_model_matrix[n,] * beta_det;
@@ -194,14 +197,29 @@ for(n in 1:n_site) {
   }
 
   for(s in 1:S) {
+  vector[n_max[n,s]+1] Nlik;
+  vector[n_max[n,s]+1] gN;
+  vector[n_max[n,s]+1] pcond;
   log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s] + eps_bioregion[s,site_bioreg[n]];
 
   for(j in 1:n_gs) {
     eps_site[s, n,j] = grp_sd[s] * eps_raw[s,n,j];
     epsi[s,n,j] = exp(zeta[s,j] + eps_site[s,n,j]);
   }
-
   eps_ngs[s,n,] = epsi[s,n,]/sum(epsi[s,n,]);
+
+  // p-bar
+
+  for(k in 1:(n_max[n,s]+1))
+    Nlik[k] = exp(neg_binomial_2_log_lpmf(k-1 | log_lambda_psi[s,n], odRN));
+
+  gN = Nlik/sum(Nlik);
+
+  for(k in 1:(n_max[n,s]+1))
+    pcond[k] = (1 - (1 - r[start_idx[n]])^(k-1)) * gN[k];
+
+  pbar[s,n] = sum(pcond);
+
   }
 
   for(j in 1:n_gs) {
@@ -209,7 +227,7 @@ for(n in 1:n_site) {
     p[n,j] = exp(log_p[n,j]);
     // model site abundance
     for(s in 1:S) {
-    lambda[s,n,j] = exp(log_lambda_psi[s,n] + log_p[n,j] + log_activ + log(eps_ngs[s,n,j]) + log(r[start_idx[n]])) .* survey_area[n];
+    lambda[s,n,j] = exp(log_lambda_psi[s,n] + log_p[n,j] + log_activ + log(eps_ngs[s,n,j]) + log(pbar[s,n])) .* survey_area[n];
     }
   }
 
