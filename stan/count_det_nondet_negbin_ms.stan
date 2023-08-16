@@ -302,6 +302,7 @@ generated quantities {
   array[S, npc] real pred;
   //array[S, npc] real pred_trunc;
   array[S, np_reg] real Nhat_reg;
+  array[S, np_bioreg] real Nhat_bioreg;
   // array[np_reg] real Nhat_reg_design;
   real Nhat[S];
   //real Nhat_trunc[S];
@@ -348,6 +349,7 @@ for(n in 1:n_site) {
 
 for(s in 1:S) {
 for(i in 1:np_reg) Nhat_reg[s,i] = 0;
+for(i in 1:np_bioreg) Nhat_bioreg[s,i] = 0;
 
 for(i in 1:npc) {
   pred[s,i] = neg_binomial_2_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]], od[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
@@ -356,6 +358,7 @@ for(i in 1:npc) {
     trunc_counter[s] += 1;
   }
   Nhat_reg[s,pred_reg[i]] += pred[s,i];
+  Nhat_bioreg[s,pred_bioreg[i]] += pred[s,i];
 }
 Nhat[s] = sum(pred[s,]);
 //Nhat_trunc[s] = sum(pred_trunc[s,]);

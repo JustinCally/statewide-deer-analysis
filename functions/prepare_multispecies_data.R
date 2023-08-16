@@ -85,13 +85,14 @@ prepare_model_data_multispecies <- function(species,
                   time_cut = cut(rtime, breaks =  seq(from = 0, to = 24, by = 2)),
                   time_midpoint = 2*as.integer(time_cut)-1)
 
-  site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
+  site_vars <- cams_curated %>%
+    left_join(dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
     dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
     dplyr::collect() %>%
     dplyr::mutate(HerbaceousUnderstoryCover = NNWHUCover + ENWHUCover,
                   SiteID = dplyr::case_when(SiteID == "47191" & CameraID == "HO04101053" ~ "47191A",
                                             SiteID == "47191" & CameraID != "HO04101053" ~ "47191B",
-                                            TRUE ~ SiteID)) %>% # native + exotic herbaceous cover
+                                            TRUE ~ SiteID))) %>% # native + exotic herbaceous cover
     dplyr::arrange(SiteID) %>%
     as.data.frame()
 
@@ -497,15 +498,15 @@ prepare_model_data_multispecies <- function(species,
               np_bioreg = length(bc_filtered$bioregion_fact),
               site_reg = site_reg,
               pred_reg = pred_reg,
-              np_reg = length(unique(site_reg)),
+              np_reg = length(unique(site_reg)))
               # np_evc = evc_groups$np_evc,
               # site_evc = evc_groups$site_evc,
               # pred_evc = evc_groups$pred_evc,
-              hs_df = hs_df,
-              hs_df_global = hs_df_global,
-              hs_scale_global = hs_scale_global, # ratio of expected non-zero to zero divided by total observation as per brms convention
-              hs_scale_slab = hs_scale_slab,
-              hs_df_slab = hs_df_slab)
+              # hs_df = hs_df,
+              # hs_df_global = hs_df_global,
+              # hs_scale_global = hs_scale_global, # ratio of expected non-zero to zero divided by total observation as per brms convention
+              # hs_scale_slab = hs_scale_slab,
+              # hs_df_slab = hs_df_slab)
   if(evaltransects) {
     data_trans <- list(trans = nrow(transect_mm),
                        y2 = y2,

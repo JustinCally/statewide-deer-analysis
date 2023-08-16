@@ -127,10 +127,10 @@ Outline which species should be modeled, and which projects to source data from.
 
 ```{r data_params}
 # Species to run model for.
-deer_species_all <- c("Cervus unicolor", "Dama dama", "Cervus elaphus")
-species_names <- c("Sambar Deer", "Fallow Deer", "Red Deer")
+deer_species_all <- c("Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
+species_names <- c("Sambar Deer", "Fallow Deer", "Red Deer", "Hog Deer")
 # Projects to select.
-project_short_name <- c("hog_deer_2023", "StatewideDeer")
+project_short_name <- c("hog_deer_2023", "StatewideDeer", "budj_bim_pig_deer_2022")
 # Buffer for data extraction.
 spatial_buffer <- 1000
 # Covariate Rasters
@@ -178,6 +178,7 @@ ab_formula_4 <- ~ 1
 
 #### Detection Formula: Distance-sampling ####
 det_formula <- ~ scale(HerbaceousUnderstoryCover) # average detection across all sites #scale(HerbaceousUnderstoryCover)
+det_null <- ~ 1
 ```
 
 ## Create model data
@@ -190,12 +191,10 @@ Using the `prepare_model_data()` function we generate the data for the `STAN` mo
 
 ```{r ModelData}
 if(!file.exists("data/multispecies_data.rds")) {
-multispecies_data <- prepare_model_data_multispecies(species = c("Cervus unicolor", 
-                                                                 "Dama dama", 
-                                                                 "Cervus elaphus"),
+multispecies_data <- prepare_model_data_multispecies(species = deer_species_all,
                                  projects = project_short_name,
                      buffer = spatial_buffer,
-                     detection_formula = det_formula,
+                     detection_formula = det_null,
                      abundance_formula = ab_formula_1,
                      transect_formula = transect_formula,
                      con = con,
@@ -219,7 +218,7 @@ evc_groups <- readRDS("data/evc_groupnames.rds")
 
 multispecies_data <- c(multispecies_data, evc_groups)
 
-saveRDS(multispecies_data, "data/multispecies_data.rds")
+saveRDS(multispecies_data, "data/multispecies_data_bb.rds")
 } else {
   multispecies_data <- readRDS("data/multispecies_data.rds")
 }
@@ -342,7 +341,7 @@ Our strategy for model evaluation is to determine the best performing model out 
 
 We use leave-one-out cross-validation (LOO-CV); a Bayesian model evaluation process [@Vehtari_2017; @loo_2020] to compare the model against a null model. As long as the model with 'all' parameters performs better than the null models it is suitable to use it exclusively for all analyses and predictions. Importantly, the cross-validation also gives us the ability to compare the predictive performance against a null model. In doing so we see that the model with abundance covariates performs better than a null model. Noting that the null model will still include a random bioregion effect.
 
-```{r, eval=FALSE}
+```{r loo}
 loos <- list()
 for(i in 1:length(model_fits)) {
   loos[[i]] <- model_fits[[i]]$loo()
@@ -578,7 +577,7 @@ terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds
                                                                         2, 
                                                                         mean, 
                                                                         na.rm = T, 
-                                                                        trim = 0.025)
+                                                                        trim = 0.01)
 
 mean_raster[[i]] <- pred_raster
 mean_raster_discrete[[i]] <- mean_raster[[i]]
@@ -686,7 +685,7 @@ abundance_table <- function(model, regions, pred_area, caption, species_index) {
                   SD = sd, 
                   MAD = mad,
                   `5 %` = q5, 
-                  `90 %` = q95, 
+                  `95 %` = q95, 
                   `Area km2`,
                   `Average Density (per km2)`)
   
@@ -739,9 +738,7 @@ av_det_rates %>%
   collapse_rows(1)
 ```
 
-For a group size of 1 we can generate detection function plots that show how detection rates fall-off over varying distances.
-
-*Note the following data suggests we should test hazard functions for Fallow, Red and Hog*.
+We can generate detection function plots that show how detection rates fall-off over varying distances.
 
 ```{r DistancePlots, fig.caption="Distance-sampling detection process for Sambar Deer (group size = 1). Herbaceous understorey cover in the area surrounding the camera impacts detection probability.", fig.width = 8, fig.height = 6, message = FALSE, warning=FALSE}
 site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
@@ -762,12 +759,13 @@ site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) 
 
 det_curve <- model_fits[[top]]$draws("DetCurve", format = "draws_matrix") %>%
   as.data.frame() %>%
-  head(250) %>%
+  # head(250) %>%
   pivot_longer(cols = everything())
 
 det_curve_wr <- det_curve %>%
   mutate(var = stringr::str_extract(name, "(?<=\\[).+?(?=\\])")) %>%
-  separate(var, into = c("s", "Distance"), sep = ",")
+  separate(var, into = c("s", "Distance"), sep = ",") %>%
+  mutate(Distance = as.numeric(Distance)-0.5)
 
 det_vars_pred <- site_vars %>%
   mutate(s = as.character(1:nrow(.)),
@@ -787,8 +785,7 @@ det_curve_sum <- det_curve_wr %>%
             q5 = quantile(value, 0.05),
             q95 = quantile(value, 0.95))
 
-scaleHN <- det_curve_sum %>% filter(Distance == 2) %>% pull(median) %>% mean()
-
+scaleHN <- det_curve_sum %>% filter(Distance == 1.5) %>% pull(median) %>% mean()
 
 y_combined <- colSums(rowSums(multispecies_data$y, dims = 2)) %>% # just for group size 1
   as.data.frame() %>%
