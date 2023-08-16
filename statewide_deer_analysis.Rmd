@@ -217,8 +217,6 @@ multispecies_data$transects[is.na(multispecies_data$transects)] <- 0
 
 evc_groups <- readRDS("data/evc_groupnames.rds")
 
-# multispecies_data$site_EVCGROUP <- NULL
-
 multispecies_data <- c(multispecies_data, evc_groups)
 
 saveRDS(multispecies_data, "data/multispecies_data.rds")
@@ -464,7 +462,7 @@ vic_regions <- vicmap_query("open-data-platform:delwp_region") %>%
 
 site_preds <- function(model, cams_curated, species_index) {
   
-rn_dens <- model$summary("N_site", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.01), posterior::default_summary_measures(), posterior::default_convergence_measures())
+rn_dens <- model$summary("N_site", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures(), posterior::default_convergence_measures())
   
 which_sp <- which(stringr::str_detect(string = rn_dens$variable,
                                          pattern = paste0("N_site\\[",
@@ -488,7 +486,7 @@ site_density_plot <- function(densities, regions, species) {
   
 plot <- ggplot2::ggplot(data = densities) +
   ggplot2::geom_sf(data = regions, alpha = 0.75, fill = "grey80") +
-  ggplot2::geom_sf(aes(fill = density, alpha = mean), shape = 21, size = 4) +
+  ggplot2::geom_sf(aes(fill = density, alpha = mean), shape = 21, size = 3) +
   scale_fill_viridis_d(name = "", guide = guide_legend(override.aes = list(size = 6))) +
   scale_alpha_continuous(range = c(0.5,1), guide = "none") +
   labs(title = paste0('Density of ',species ,' Deer'), fill = bquote('Deer per'~km^2)) +
@@ -580,7 +578,7 @@ terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds
                                                                         2, 
                                                                         mean, 
                                                                         na.rm = T, 
-                                                                        trim = 0.01)
+                                                                        trim = 0.025)
 
 mean_raster[[i]] <- pred_raster
 mean_raster_discrete[[i]] <- mean_raster[[i]]
@@ -672,13 +670,13 @@ reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
 
 abundance_table <- function(model, regions, pred_area, caption, species_index) {
   
-  reg <- model$summary("Nhat_reg", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.01), posterior::default_summary_measures(), posterior::default_convergence_measures())
+  reg <- model$summary("Nhat_reg", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures(), posterior::default_convergence_measures())
   
   which_sp <- which(stringr::str_detect(string = reg$variable,
                                          pattern = paste0("Nhat_reg\\[", species_index)))
   
   regional_abundance <- reg[which_sp,] %>%
-    dplyr::bind_rows(model$summary("Nhat", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.01), posterior::default_summary_measures(), posterior::default_convergence_measures())[species_index,]) %>% 
+    dplyr::bind_rows(model$summary("Nhat", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures(), posterior::default_convergence_measures())[species_index,]) %>% 
     dplyr::mutate(variable = c(regions$delwp_region, "TOTAL"), 
                   `Area km2` = c(pred_area, sum(pred_area)), 
                   `Average Density (per km2)` = round(median/`Area km2`, 2)) %>% 
@@ -721,7 +719,6 @@ At a site, there are two processes that may lead us to not record deer on a came
 Below we show the average detection rate for a given group of deer in front of the camera (up to 12.5m). 
 
 ```{r AverageDetectionRates}
-
 det_rates <- model_fits[[top]]$summary("p") %>%
   mutate(var = stringr::str_extract(variable, "(?<=\\[).+?(?=\\])")) %>%
   separate(var, into = c("site", "Group Size"), sep = ",")
@@ -790,6 +787,8 @@ det_curve_sum <- det_curve_wr %>%
             q5 = quantile(value, 0.05),
             q95 = quantile(value, 0.95))
 
+scaleHN <- det_curve_sum %>% filter(Distance == 2) %>% pull(median) %>% mean()
+
 
 y_combined <- colSums(rowSums(multispecies_data$y, dims = 2)) %>% # just for group size 1
   as.data.frame() %>%
@@ -797,7 +796,7 @@ y_combined <- colSums(rowSums(multispecies_data$y, dims = 2)) %>% # just for gro
   mutate(Distance = midpts,
          Prop = Count/(max(Count)),
          CountS = Count/(2 * 2.5 * Distance)/max_distance^2,
-         PropS = CountS/(max(CountS)))
+         PropS = scaleHN*CountS/(max(CountS)))
 
 detection_plot_HN <- ggplot(aes(x = Distance), data = det_curve_sum) +
   geom_col(aes(y = PropS), fill = "grey70", colour = "grey20", width = 2.5, data = y_combined, alpha = 0.7) +
@@ -820,7 +819,7 @@ detection_plot_HN
 
 For Sambar, Fallow and Red Deer we were able to estimate detection rates of the various methods used to detect deer (camera, footprints, pellets, rubbings and wallows).
 
-```{r detectionplots, fig.width=8, fig.height=5, fig.cap="Detection Probability for the various methods of survey. Camera trap detection probability is based on average deployment length, while transects are based on 3 independent transect searches"}
+```{r detectionplots, fig.width=8, fig.height=5, fig.cap="Detection Probability for the various methods of survey. Camera trap detection probability is based on average deployment length, while transects are based on 3 independent transect searches", warnings = FALSE, message = FALSE}
   
 all_draws <- model_fits[[top]]$draws("beta_trans_det", format = "df")
 
@@ -888,10 +887,20 @@ det_plot[[i]] <- plot_data
 
 }
 data_for_plot <- bind_rows(det_plot) %>% 
-  mutate(species = "All (combined)")
+  mutate(species = "All (combined)") %>%
+  mutate(Density = "1 deer/km^2^")
 
+data_d3 <- data_for_plot %>% 
+  mutate(value = 1 - (1 - value)^3, 
+         Density = "3 deer/km^2^")
 
-marginal_effects_plot_cmd_all(data_for_plot, 
+data_d5 <- data_for_plot %>% 
+  mutate(value = 1 - (1 - value)^5, 
+         Density = "5 deer/km^2^")
+
+data_combined <- bind_rows(data_for_plot, data_d3, data_d5)
+
+marginal_effects_plot_cmd_all(data_combined, 
                               factor = TRUE,
                               ylab = "Detection probability") +
   xlab("Survey method") +
@@ -899,7 +908,8 @@ marginal_effects_plot_cmd_all(data_for_plot,
   theme(legend.position = "top") +
   scale_fill_brewer(palette = "Set1") +
   # scale_x_discrete(expand = c(0, 0)) +
-  theme_classic()
+  theme_classic() +
+  theme(legend.text = ggtext::element_markdown())
 
 ```
 
@@ -998,6 +1008,23 @@ marginal_effects_plot_cmd_all(all_me_data,
   theme_bw() +
   xlab("Covariate Value")
 ```
+# Additional Parameters of Interest
+
+Below is a table with several model parameters we estimated:  
+
+```{r}
+key_params <- model_fits[[top]]$summary(c("av_gs", 
+                                          "od_mu", 
+                                          "od_sd", 
+                                          "odRN", 
+                                          "activ", 
+                                          "Nhat_sum"))
+
+key_params %>% 
+  kbl(format = "html", digits = 2, caption = "Several key outputs and parameters of the model not reported earlier") %>%
+  kable_styling("striped")
+```
+
 
 # Relating abundance to vegetation. 
 

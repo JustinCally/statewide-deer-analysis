@@ -45,7 +45,11 @@ pred_evc_lvl_i <-  vic_model_data_resampled_df %>%
   sf::st_nearest_feature(evc_data_filtered %>% st_transform(3111))
 
 evc_groups <- list()
-evc_groups[["site_EVCGROUP"]] <- evc_joined_mutate %>% select(BIOEVCLVL, BIOEVC) %>% st_drop_geometry() %>% distinct()
+evc_groups[["site_EVCGROUP"]] <- evc_joined_mutate %>%
+  select(BIOEVCLVL, BIOEVC) %>%
+  st_drop_geometry() %>%
+  distinct() %>%
+  as.data.frame()
 evc_groups[["pred_evc"]] <- evc_data_filtered$BIOEVCLVL[pred_evc_lvl_i]
 evc_groups[["site_evc"]] <- evc_joined_mutate$BIOEVCLVL
 evc_groups[["np_evc"]] <- length(unique(evc_groups[["site_evc"]]))
