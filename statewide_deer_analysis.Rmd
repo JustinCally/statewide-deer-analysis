@@ -551,6 +551,11 @@ fallow_preds <- site_preds(model_fits[[top]], cams_curated = cams_curated, speci
 red_preds <- site_preds(model_fits[[top]], cams_curated = cams_curated, species_index = 3)
 hog_preds <- site_preds(model_fits[[top]], cams_curated = cams_curated, species_index = 4)
 
+deer_predictions <- list(Sambar = sambar_preds, 
+                         Fallow = fallow_preds, 
+                         Red = red_preds, 
+                         Hog = hog_preds)
+
 cowplot::plot_grid(site_density_plot(sambar_preds, vic_regions, species = "Sambar"),
 site_density_plot(fallow_preds, vic_regions, species = "Fallow"),
 site_density_plot(red_preds, vic_regions, species = "Red"), 
@@ -615,10 +620,13 @@ pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
   pattern = "[*]", negate = T)]], mean)
 
 mean_raster <- list()
+occ_raster <- list()
 mean_raster_discrete <- list()
 
 # gp_preds_draws_all <- model_fits[[top]]$draws("pred", format = "matrix")
 gp_preds_draws_all <- model_fits[[top]]$draws("pred", format = "matrix")
+# gp_preds_summary_all <- model_fits[[top]]$summary("pred", prob_occ = ~ mean(. > 0))
+
 
 for(i in 1:length(deer_species_all)) {
 
@@ -647,6 +655,10 @@ values(mean_raster_discrete[[i]]) <- cut(values(mean_raster_discrete[[i]]) ,
                                                     "5 - 10", 
                                                     "10 - 15",
                                                     "15 +"))
+
+occ_raster[[i]] <- pred_raster
+terra::values(occ_raster[[i]])[!is.na(terra::values(occ_raster[[i]]))] <- apply(gp_preds_draws_sp, 2, function(x) sum(x > 0)/length(x))
+
 }
 
 # combine mean rasters together
@@ -656,6 +668,13 @@ names(combined_raster) <- c("Average Sambar Deer Density (per km2)",
                             "Average Red Deer Density (per km2)", 
                             "Average Hog Deer Density (per km2)")
 
+combined_occupancy_raster <- rast(occ_raster)
+names(combined_occupancy_raster) <- c("Average Sambar Deer Occupancy Probability", 
+                            "Average Fallow Deer Occupancy Probability", 
+                            "Average Red Deer Occupancy Probability", 
+                            "Average Hog Deer Occupancy Probability")
+
+writeRaster(combined_occupancy_raster, "outputs/rasters/combined_occupancy_raster.tif", overwrite = T)
 writeRaster(combined_raster, "outputs/rasters/combined_deer_average_density.tif", overwrite = T)
 ```
 
