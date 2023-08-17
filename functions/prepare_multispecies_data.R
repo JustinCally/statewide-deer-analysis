@@ -12,11 +12,6 @@ prepare_model_data_multispecies <- function(species,
                                n_max_det,
                                evaltransects = TRUE,
                                snapshot_interval = 2,
-                               hs_df,
-                               hs_df_global,
-                               hs_scale_global, # ratio of expected non-zero to zero divided by total observation as per brms convention
-                               hs_scale_slab,
-                               hs_df_slab,
                                filter_behaviour = TRUE) {
 
   if(species[1] == "All deer") {

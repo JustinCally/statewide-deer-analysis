@@ -107,6 +107,18 @@ posterior_checks_multispecies <- function(model, model_data, species_index,
       ggplot2::scale_x_continuous(trans = "sqrt", limits = c(-1, qmax)) +
       ggplot2::theme_bw() +
       ggplot2::theme(legend.position = "top")
+  } else if(identical(stat, ppc_dens_overlay)) {
+    colfun <- model_draws[,which_inc]
+    qmin <- quantile(colfun, probs = 0)
+    qmax <- max(n_obs_totals[which_inc])
+
+    ppc_plots <- bayesplot::ppc_dens_overlay(y = n_obs_totals[which_inc],
+                                          yrep = round(model_draws[,which_inc]),
+                                          ...) +
+      ggplot2::ggtitle(label = title) +
+      ggplot2::scale_x_continuous(trans = "sqrt", limits = c(-1, qmax)) +
+      ggplot2::theme_bw() +
+      ggplot2::theme(legend.position = "top")
   } else {
     colfun <- apply(model_draws[,which_inc], MARGIN = 1, FUN = stat)
     qmin <- quantile(colfun, probs = 0)
