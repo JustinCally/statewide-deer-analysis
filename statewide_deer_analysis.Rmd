@@ -1245,7 +1245,7 @@ fit2 <- brm(bform2,  data = site_density_df_joined, chains = 2, cores = 2, famil
 ```
 
 ```{r VegOutcomes, warning = FALSE}
-sjPlot::tab_model(fit1)
-sjPlot::tab_model(fit2)
+sjPlot::tab_model(fit1, show.re.var = F)
+sjPlot::tab_model(fit2, show.re.var = F)
 ```
 
