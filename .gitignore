@@ -2,7 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
-outputs
 stan/count_det_nondet_negbin_gp
 stan/count_det_nondet_negbin_hs_gp
 stan/count_det_nondet_poisson_gp
@@ -39,3 +38,10 @@ data/landcover/2017_TDLC_smoothed_urbanmasked_class.tif.ovr.aux.xml
 data/landcover/PDLC_smoothed.tif.lyr
 data/landcover/SDLC_smoothed.tif.lyr
 data/landcover/TDLC_smoothed.tif.lyr
+outputs/models/fit_multispecies_1.rds
+outputs/models/fit_multispecies_2.rds
+outputs/models/fit_multispecies_3.rds
+outputs/models/fit_multispecies_4.rds
+outputs/models/fit_multispecies_5.rds
+outputs/models/fit_multispecies_6.rds
+outputs/models/fit_multispecies_7.rds
