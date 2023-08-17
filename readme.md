@@ -2,4 +2,8 @@ This repository contains analysis of modelling deer abundance and distribution i
 
 + `data/`: Contains various pre-prepared data files including transect counts of signs (created by the `data/species_assign_wrangle.R` script). It also contains data and scripts for detwermining ecological vegetation communities (EVCs) for the model data. The `data/prediction_raster` has the raster we use to predict to across Victoria (public land). And `data/historic_ala_records.rds` is data used in `data/species_assign_wrangle.R`.      
 
-+  
++  `functions/` has a suite of functions used in data preparation and then model interegation.  
+
++  `outputs/` is where models and model outputs such as rasters and plots are located. Note that the stan model draws are not git tracked as they are very large files.  
+
++  `stan/` is where the stan models used in the analysis are stored.  
