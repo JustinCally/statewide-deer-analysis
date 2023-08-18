@@ -98,7 +98,7 @@ library(tidyr)
 library(VicmapR)
 library(kableExtra)
 library(brms)
- options(brms.backend = "cmdstanr")
+options(brms.backend = "cmdstanr")
 check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
 register_knitr_engine(override = FALSE)
 options(mc.cores=8)
@@ -551,10 +551,12 @@ fallow_preds <- site_preds(model_fits[[top]], cams_curated = cams_curated, speci
 red_preds <- site_preds(model_fits[[top]], cams_curated = cams_curated, species_index = 3)
 hog_preds <- site_preds(model_fits[[top]], cams_curated = cams_curated, species_index = 4)
 
-deer_predictions <- list(Sambar = sambar_preds, 
+site_deer_predictions <- list(Sambar = sambar_preds, 
                          Fallow = fallow_preds, 
                          Red = red_preds, 
                          Hog = hog_preds)
+
+saveRDS(site_deer_predictions, "outputs/site_deer_predictions.rds")
 
 cowplot::plot_grid(site_density_plot(sambar_preds, vic_regions, species = "Sambar"),
 site_density_plot(fallow_preds, vic_regions, species = "Fallow"),
@@ -639,22 +641,22 @@ terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds
                                                                         2, 
                                                                         mean, 
                                                                         na.rm = T, 
-                                                                        trim = 0.025)
+                                                                        trim = 0.00125) #filter out highest draw
 
 mean_raster[[i]] <- pred_raster
 mean_raster_discrete[[i]] <- mean_raster[[i]]
 max_pred <- max(values(mean_raster[[i]]), na.rm = T)
 
 values(mean_raster_discrete[[i]]) <- cut(values(mean_raster_discrete[[i]]) , 
-                                         breaks = c(0, 0.1,1,3,5,10,15,max_pred), 
+                                         breaks = c(0,0.25,0.5,1,3,5,10,max_pred), 
                                          include.lowest = T, right = T,
-                                         labels = c("0 - 0.1", 
-                                                    "0.1 - 1", 
+                                         labels = c("< 0.25",
+                                                    "0.25 - 0.5", 
+                                                    "0.5 - 1", 
                                                     "1 - 3", 
                                                     "3 - 5",
                                                     "5 - 10", 
-                                                    "10 - 15",
-                                                    "15 +"))
+                                                    "10 +"))
 
 occ_raster[[i]] <- pred_raster
 terra::values(occ_raster[[i]])[!is.na(terra::values(occ_raster[[i]]))] <- apply(gp_preds_draws_sp, 2, function(x) sum(x > 0)/length(x))
@@ -690,6 +692,10 @@ state <- VicmapR::vicmap_query("open-data-platform:vmlite_victoria_polygon_su5")
 
 gippsland <- vic_regions %>% filter(delwp_region == "GIPPSLAND")
 
+delwp_pal <- colorRampPalette(c("#B9C600", 
+                                delwp_cols[["Teal"]], 
+                                delwp_cols[["Navy"]]))
+
 
 plot_abundance <- function(raster, state, species, crop = NULL) {
   
@@ -698,12 +704,16 @@ plot_abundance <- function(raster, state, species, crop = NULL) {
     state <- crop
   }
   
+  lvls <- length(unique(values(raster, na.rm = T)))
+  
   plot <- ggplot2::ggplot() +
-    ggplot2::geom_sf(data = state, alpha = 0.5, linewidth = 0.5, fill = "grey80") + 
+    ggplot2::geom_sf(data = state, alpha = 1, linewidth = 0.5, fill = "grey90") + 
     tidyterra::geom_spatraster(data = raster, na.rm = T) + 
-    tidyterra::scale_fill_terrain_d(na.translate = FALSE) + 
+    # tidyterra::scale_fill_terrain_d(na.translate = FALSE) + 
+    ggplot2::scale_fill_manual(values = delwp_pal(lvls), na.value = "transparent", na.translate = F) +
     ggplot2::labs(fill = bquote('Deer per'~km^2), title = paste0("Average Density of ", species, " on Victorian Public Land")) + 
-    ggspatial::annotation_scale() 
+    ggspatial::annotation_scale() +
+    delwp_theme()
   
   return(plot)
   
@@ -1082,6 +1092,8 @@ for(i in 1:length(species_names)) {
 ```{r, eval = FALSE, include = FALSE}
 site_grid <- st_read(dsn = con,
                      layer = Id(schema = "deervic", table = "raw_sampling_grid"))
+site_grid_c <- st_read(dsn = con,
+                     layer = Id(schema = "deervic", table = "curated_final_site_selection"))
 
 site_grid_filter <- site_grid %>% filter(frac_area >= 0.05)
 load("data/crown_layers_extent.rda")
@@ -1195,22 +1207,37 @@ key_params %>%
 
 # Relating abundance to vegetation 
 
-From our point density estimates of deer, we can model relationships between deer densities at sites and a range of structural vegetation measures collected during the surveys. For this part of the analysis we implement two different models to investigate the relationship between vegetation and vegetation.  
+From our point density estimates of deer, we can model relationships between deer densities at sites and a range of structural vegetation measures collected during the surveys. For this part of the analysis we implement a multivariate regression.   
 
-Firstly we construct a multivariate gaussian model, where several response variables are continuous data measured at sites. They are:  
+Firstly the response variables we model are: 
 
++ Bare Ground Cover (Beta Distribution) 
++ Native Woody Understorey Cover (Beta Distribution) 
++ Native Non-woody Understorey Cover (Beta Distribution) 
++ Presence of seedlings (Negative Binomial Distribution) 
++ Presence of saplings (Negative Binomial Distribution) 
++ Presence of exotic flora (Bernoulli Distribution)  
+
+While our main predictor of interest is the density of deer at a site, we also control for the following predictors:  
+
++ BIO01: Annual Mean Temperature 
++ BIO04: Temperature Seasonality    
++ BIO06: Min Temperature of Coldest Month
++ BIO12: Annual Precipitation    
++ BIO15: Precipitation Seasonality (Coefficient of Variation)  
++ Soil Nitrogen  
++ Time since last fire (factor grouping)  
++ TWIND (Topographic wetness index)  
++ Forest Edge  
 + Canopy Cover  
-+ Bare Ground Cover  
-+ Native Woody Understorey Cover
-+ Native Non-woody Understorey Cover  
 + Top Height 
++ EVC Group (random effect with 19 groups)
 
-These response variables have square-root transformations applied to allow them to be on a more normal scale,. Secondly we run a model with a multivariate response and a binomial logit-link. This allows us to model the relationship between deer densities and the following binomial reponse varibles:  
+## Data Preparation  
 
-+ Presence of exotic flora  
-+ Presence of seedlings  
-+ Presence of saplings  
+We can use the sum of estimated deer density for the four species at each site as our key predictor variable. Given that we already extracted a range of bioclimatic and environmental covariates for the original model, we can combine those with the data available here. 
 
+Note that this model is run on a subset of sites (sites surveyed as part of the statewide deer survey), as the hog deer sites did not have complete vegetation metrics recorded.  
 
 ```{r Vegetation, eval = TRUE, echo = FALSE, results = 'hide', message=FALSE,warning=FALSE}
 density <- model_fits[[top]]$draws("N_site", format = "matrix")
@@ -1231,7 +1258,9 @@ site_density_df <- cams_curated %>%
   mutate(AllDeerDensity = site_density_ul, 
          Bioregion = factor(multispecies_data$site_bioreg), 
          EVC = factor(multispecies_data$site_evc)) %>% 
-  filter(ProjectShortName == "StatewideDeer")
+  filter(ProjectShortName == "StatewideDeer") %>% 
+  left_join(multispecies_data[["raw_data"]] %>% select(-EVC, - BIOREGION)) %>%
+  mutate(TSLF_bin = as.factor(round(TSLF_bin)))
 
  site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
     dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
@@ -1249,22 +1278,89 @@ site_density_df <- cams_curated %>%
     as.data.frame()
  
  site_density_df_joined <- site_density_df %>% 
-   left_join(site_vars)
-
-bform1 <- bf(mvbind(sqrt(CanopyCov), 
-                    sqrt(BGroundCover), 
-                    sqrt(NWUCover), 
-                    sqrt(NNWHUCover), 
-                    sqrt(TopHeight)) ~ sqrt(AllDeerDensity) + (1|EVC)) + set_rescor(FALSE) 
-
-bform2 <- bf(mvbind(ExoticPresence, SeedlingsPresence, SaplingsPresence) ~ sqrt(AllDeerDensity) + (1|EVC))
-
-fit1 <- brm(bform1, data = site_density_df_joined, chains = 2, cores = 2)
-fit2 <- brm(bform2,  data = site_density_df_joined, chains = 2, cores = 2, family = bernoulli(link = "logit"))
+   left_join(site_vars) %>%
+   mutate(BGroundCover = ifelse(BGroundCover == 0, 0.125, BGroundCover)/100, 
+             NWUCover = ifelse(NWUCover == 0, 0.125, NWUCover)/100, 
+             NNWHUCover = ifelse(NNWHUCover == 0, 0.125, NNWHUCover)/100)
 ```
 
+## Model Execution 
+
+We use the `brms` package to run our model in a Bayesian framework [@brms1; @brms2; @brms3]. Our model is run in parallel on four cores over four chains for 1,000 sampling iterations per chain (1,000 warmup iterations). 
+
+
+```{r VegetationModel, eval = TRUE, echo = FALSE, results = 'hide', message=FALSE,warning=FALSE}
+bform1 <- bf(mvbind(BGroundCover, 
+                    NWUCover, 
+                    NNWHUCover, 
+                    Seedlings,
+                    Saplings,
+                    ExoticPresence) ~ scale(sqrt(AllDeerDensity))
+                                    + scale(BIO01)
+                                    + scale(BIO04)
+                                    + scale(BIO06)
+                                    + scale(BIO12)
+                                    + scale(BIO15)
+                                    + scale(Nitrogen)
+                                    + TSLF_bin
+                                    + scale(TWIND)
+                                    + scale(sqrt(ForestEdge))
+                                    + scale(sqrt(CanopyCov))
+                                    + scale(sqrt(TopHeight))
+                                    + (1|EVC)) 
+
+
+vegfit <- brm(bform1, 
+            data = site_density_df_joined, 
+            family = list(Beta(link = "logit"), 
+                          Beta(link = "logit"),
+                          Beta(link = "logit"),
+                          negbinomial(),
+                          negbinomial(),
+                          bernoulli(link = "logit")),
+            inits = "0",
+            chains = 4, 
+            cores = 4, 
+            iter = 2000, 
+            warmup = 1000,
+            backend = "cmdstanr")
+```
+
+## Model Results 
+
+### Model Summary  
+
+Below we show a complete summary of the model, including all coefficients estimated for all the parameters and response variables. Standard deviations for the EVC random effect and the estimates of the $\phi$ parameter in the beta-distribution models, and the shape parameter in the negative binomial models are also shown.  
+
 ```{r VegOutcomes, warning = FALSE}
-sjPlot::tab_model(fit1, show.re.var = F)
-sjPlot::tab_model(fit2, show.re.var = F)
+summary(vegfit)
+```
+
+### Deer Density Conditional Effects  
+
+Given our main interest in the model is deer density and how it impacts the suite of response variables, we generate marginal/conditional effects plots for the relationship between deer and the vegetation metric. Based on these plots we can see a "significant" (confidence intervals not-overlapping zero) effect of deer density on: bare ground (-ve), native woody understorey (-ve),  native non-woody/herbaceous understorey (+ve), and presence of exotic species (+ve).  
+
+```{r VegPlots, fig.width = 10, fig.height=12, fig.cap="Impact of deer density on a range of vegetation measure, including (A) bare ground cover, (B) native woody understorey, (C) native herbaceous understorey cover, (D) seedlings, (E) saplings, and (F) th presence of exotic species"}
+plot_list <- conditional_effects(vegfit, effects = "AllDeerDensity", prob = 0.9)
+
+plot_deer_relationship <- function(plot_data, yaxis) {
+  ggplot(plot_data) +
+    geom_ribbon(aes(x = AllDeerDensity, ymin = `lower__`, ymax = `upper__`), 
+                fill = delwp_cols[["Navy"]], alpha = 0.3) +
+    geom_smooth(aes(x = AllDeerDensity, y = `estimate__`), 
+                colour = delwp_cols[["Navy"]], method = "loess", formula = y~x) +
+    ylab(paste(yaxis)) +
+    delwp_theme()
+    
+}
+
+cowplot::plot_grid(plot_deer_relationship(plot_list[[1]], "Bare Ground Cover"), 
+                   plot_deer_relationship(plot_list[[2]], "Native Woody Understorey Cover"),
+                   plot_deer_relationship(plot_list[[3]], "Native Herbaceous Understorey Cover"),
+                   plot_deer_relationship(plot_list[[4]], "Seedling Counts") + scale_y_sqrt(),
+                   plot_deer_relationship(plot_list[[5]], "Sapling Counts"),
+                   plot_deer_relationship(plot_list[[6]], "Presence of Exotic Flora"), 
+                   ncol = 2, labels = "AUTO")
+
 ```
 
