@@ -115,9 +115,9 @@ marginal_effects_plot_cmd_all <- function(data, col, factor = FALSE, trans = "id
 
     plot <- data_sum %>%
       ggplot2::ggplot(aes(x = variable, y = median)) +
-      ggplot2::geom_ribbon(aes(ymin = q5, ymax = q95), alpha = 0.25, fill = "grey20") +
-      ggplot2::geom_ribbon(aes(ymin = q25, ymax = q75), alpha = 0.25, fill = "grey20") +
-      ggplot2::geom_line(linewidth = 1.5, colour = "grey20") +
+      ggplot2::geom_ribbon(aes(ymin = q5, ymax = q95), alpha = 0.25, fill = "#201547") +
+      ggplot2::geom_ribbon(aes(ymin = q25, ymax = q75), alpha = 0.25, fill = "#201547") +
+      ggplot2::geom_line(linewidth = 1.5, colour = "#201547") +
       ggplot2::ylab(ylab) +
       ggplot2::scale_x_continuous(trans = trans) +
       # ylim(c(0,47)) +
