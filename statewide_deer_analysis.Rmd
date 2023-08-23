@@ -98,6 +98,7 @@ library(tidyr)
 library(VicmapR)
 library(kableExtra)
 library(brms)
+library(Distance)
 options(brms.backend = "cmdstanr")
 check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
 register_knitr_engine(override = FALSE)
@@ -141,6 +142,9 @@ prediction_raster <- "data/prediction_raster/statewide_raster.tif"
 n_max_no_det <- 15
 n_max_det <- 30
 ```
+
+
+
 
 ## Camera locations
 
@@ -190,10 +194,13 @@ Using the `prepare_model_data()` function we generate the data for the `STAN` mo
 
 ```{r ModelData}
 if(!file.exists("data/multispecies_data.rds")) {
+  
+crown_land <- readRDS("data/crown_land.rds")
+  
 multispecies_data <- prepare_model_data_multispecies(species = deer_species_all,
                                  projects = project_short_name,
                      buffer = spatial_buffer,
-                     detection_formula = det_null,
+                     detection_formula = det_formula,
                      abundance_formula = ab_formula_1,
                      transect_formula = transect_formula,
                      con = con,
@@ -201,10 +208,11 @@ multispecies_data <- prepare_model_data_multispecies(species = deer_species_all,
                      prediction_raster = prediction_raster,
                      n_max_no_det = n_max_no_det,
                      n_max_det = n_max_det,
+                     crown_land = crown_land,
                      evaltransects = TRUE, 
                      filter_behaviour = TRUE)
 
-multispecies_data$keyfun <- 0 # 0 = HN
+multispecies_data$keyfun <- 1 # 0 = HN, 1 = HZ
 multispecies_data$raw_data[is.na(multispecies_data$raw_data)] <- 0
 multispecies_data$transects[is.na(multispecies_data$transects)] <- 0
 
@@ -231,29 +239,6 @@ nw <- 200 # warm-up iterations
 nc <- 8 # number of chains
 ```
 
-## Model Options  
-
-We generate a set of models to evaluate against one another. We compare four different fixed-effect formulas for abundance 
-
-```{r ModelScope}
-#Models to run 
-models_to_run <- data.frame(formula = c("ab_formula_1", 
-                                        "ab_formula_2",
-                                        "ab_formula_3",
-                                        "ab_formula_4",  
-                                        "ab_formula_3",
-                                        "ab_formula_3", 
-                                        "ab_formula_4"), 
-                            keyfun = c(0,0,0,0,1,0,0), 
-                            evc = c(F,F,F,F,F,T,T), 
-                            det_form = c("det_formula", 
-                                         "det_formula",
-                                         "det_formula",
-                                         "det_formula",
-                                         "det_formula",
-                                         "det_formula",
-                                         "det_formula"))
-```
 
 
 ## Read in Models
@@ -273,14 +258,148 @@ model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.
 model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
 ```
 
-## Fit models
+## Fit models  
+
+### Detection Models  
+
+Using the distance package we compare several detection functions (hazard and half-normal) with the inclusion of a parameter (herbaceous understorey cover), which may impact detection rates. The top model (as chosen by AIC) from this selection will be included in our full STAN model.  
+
+```{r DetExplore}
+filter_behaviour <- TRUE
+snapshot_interval <- 2
+  # Camera information
+  theta <- 40 * pi / 180 # camera angle in radians
+
+  ### Get camera information for the camera sites
+  ### For cameras that have problems you need to use the date from when the problem started
+  cams_curated <- dplyr::tbl(con, dbplyr::in_schema("camtrap", "curated_camtrap_operation")) %>%
+    dplyr::filter(ProjectShortName %in% !!project_short_name) %>% # Only retrieve cam records for hog deer 2023
+    dplyr::collect() %>%
+    dplyr::mutate(DateTimeDeploy = as.POSIXct(DateTimeDeploy),
+                  DateTimeRetrieve = as.POSIXct(DateTimeRetrieve),
+                  Tk = as.numeric(DateTimeRetrieve - DateTimeDeploy, units = "secs"), #seconds
+                  Tk_prob = dplyr::coalesce(as.numeric(as.POSIXct(Problem1_to,
+                                                                  format = "%Y-%m-%d %H:%M:%OS") -
+                                                         as.POSIXct(Problem1_from, format = "%Y-%m-%d %H:%M:%OS"),
+                                                       units = "secs"), 0),
+                  Tk_adj = Tk-Tk_prob,
+                  Tkt = Tk_adj / snapshot_interval, # snapshot moments: every second second
+                  Effort = (Tk_adj*theta)/(snapshot_interval * pi * 2)) %>%
+    dplyr::arrange(SiteID)
+
+
+  ### Get the deer records (hog deer)
+  camtrap_records_deer <- dplyr::tbl(con, dbplyr::in_schema(schema = "camtrap", table = "curated_camtrap_records")) %>%
+    dplyr::filter(scientific_name %in% deer_species_all & ProjectShortName %in% !!project_short_name) %>%
+    dplyr::select(Species = scientific_name, SiteID, Distance = metadata_Distance, size = metadata_Multiples, Date, Time, Behaviour = metadata_Behaviour) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(Distance = dplyr::case_when(Distance == "NA" | is.na(Distance) ~ "999",
+                                              TRUE ~ Distance)) %>%
+    dplyr::mutate(Time = as.POSIXct(Time, format = "%H:%M:%OS"),
+                  Time_n = as.numeric(Time, units = "secs"),
+                  Behaviour = na_if(x = Behaviour, y = "NA")) %>%
+    dplyr::rowwise() %>%
+    dplyr::mutate(DistanceMod = list(stringr::str_split(Distance, pattern = "_&_")[[1]])) %>%
+    dplyr::mutate(Distance = DistanceMod[which.min(as.numeric(stringr::str_extract(DistanceMod, pattern = "[0-9]+")))]) %>%
+    dplyr::mutate(Distance = dplyr::case_when(Distance == "0-2.5" ~ "0 - 2.5",
+                                              Distance == "999" ~ NA_character_,
+                                              TRUE ~ Distance)) %>%
+    dplyr::ungroup() %>%
+    dplyr::filter(Time_n %% snapshot_interval == 0) %>% #& #snapshot moment interval of 2s
+    {if(filter_behaviour) dplyr::filter(., is.na(.data[["Behaviour"]])) else .} %>% # filter out behaviors such as camera or marker interaction
+    dplyr::group_by(SiteID, Time_n, Species) %>%
+    dplyr::slice(1) %>% # if two photos occur in one second take only one (snapshot moment = 2)
+    dplyr::ungroup()
+
+  ### Tidy format for the records
+  dcount<- camtrap_records_deer %>%
+    dplyr::select(Species, SiteID, Distance, size, Date, Time, Behaviour) %>%
+    dplyr::full_join(cams_curated %>%
+                       dplyr::select(SiteID, Tkt, Effort), by="SiteID") %>%
+    dplyr::mutate(object=1:nrow(.)) %>%
+    dplyr::mutate(size = if_else(is.na(size),0L, size)) %>%
+    dplyr::arrange(SiteID)
+
+  ### Format data in a time format for availability
+  summarised_count <- dcount
+  summarised_count$Distance <- factor(summarised_count$Distance, levels = c("0 - 2.5", "2.5 - 5", "5 - 7.5", "7.5 - 10", "10+"))
+  
+  summarised_count <- summarised_count %>%
+    mutate(distance = case_when(Distance == "0 - 2.5" ~ 1.25,
+                                Distance == "2.5 - 5" ~ 3.75,
+                                Distance == "5 - 7.5" ~ 6.25,
+                                Distance == "7.5 - 10" ~ 8.75,
+                                Distance == "10+" ~ 11.25)) %>%
+    filter(size == 1)
+  
+  # site variables 
+    site_vars <- cams_curated %>%
+    left_join(dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
+    dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
+    dplyr::collect() %>%
+    dplyr::mutate(HerbaceousUnderstoryCover = scale(NNWHUCover + ENWHUCover),
+                  WoodyUnderstoryCover = scale(NWUCover + EWUCover),
+                  Trail = factor(Trail),
+                  SiteID = dplyr::case_when(SiteID == "47191" & CameraID == "HO04101053" ~ "47191A",
+                                            SiteID == "47191" & CameraID != "HO04101053" ~ "47191B",
+                                            TRUE ~ SiteID))) %>% # native + exotic herbaceous cover
+    dplyr::arrange(SiteID) %>%
+    as.data.frame() %>%
+      select(-Time, -Tkt, -Date, -Effort) 
+    
+    ds_data <- summarised_count %>% left_join(site_vars) %>%
+      filter(!is.na(HerbaceousUnderstoryCover))
+  
+  mybreaks <- c(0,2.5,5,7.5,10,12.5)
+  trunc.list <- list(left=0, right=12.5)
+  conversion <- convert_units("metre", "metre", "metre")
+  
+  hn0 <- ds(ds_data, transect = "point", key="hn", adjustment = NULL,
+          convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
+  
+  hr0 <- ds(ds_data, transect = "point", key="hr", adjustment = NULL,
+          convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
+  
+  hn1 <- ds(ds_data, transect = "point", key="hn", adjustment = NULL, 
+            formula = ~HerbaceousUnderstoryCover,
+          convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
+  
+  hr1 <- ds(ds_data, transect = "point", key="hr", adjustment = NULL, 
+            formula = ~HerbaceousUnderstoryCover,
+          convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
+  
+  kableExtra::kbl(summarize_ds_models(hn0, hr0, hn1, hr1, output = "latex") %>% 
+                    mutate(Model = stringr::str_extract(Model, pattern = '(?<=\\{)[^\\}]+')), 
+                  digits=3,
+             caption="Model selection table for deer detection", format = "html") %>%
+    kable_styling(bootstrap_options = "striped")
+
+```
+
+
+## Model Options  
+
+Below we list the models we are implementing, all have a hazard detection function, but we compare four different abundance formulas as well as the inclusion of the EVC random effect.  
+
+```{r ModelScope}
+#Models to run 
+models_to_run <- data.frame(formula = c("ab_formula_1", 
+                                        "ab_formula_2",
+                                        "ab_formula_3",
+                                        "ab_formula_4",
+                                        "ab_formula_3"), 
+                            keyfun = c(1,1,1,1,1), 
+                            evc = c(F,F,F,F,T))
+```
+
+### Full Models  
 
 We can fit models using `cmdstanr`. Here we fit models using a poisson distribution. The models we compare are:
 
 -   Model with several key abundance covariates and half-normal detection function
 -   Model with key abundance covariates and hazard-rate detection function
 -   Null-model (bioregion only) with half-normal detection function
--  Model with key abundance covariates, bioregion random-effect and an EVC group random effect.  
+-   Model with key abundance covariates, bioregion random-effect and an EVC group random effect.  
 
 ```{r FitModels, eval = FALSE}
 model_fits <- list()
@@ -311,7 +430,8 @@ for(i in 1:nrow(models_to_run)) {
                                  init = 0.1, 
                                  max_treedepth = 10, 
                                  refresh = 25, 
-                                 show_messages = FALSE,
+                                 show_messages = TRUE,
+                                 show_exceptions = FALSE,
                                  save_warmup = FALSE,
                                  iter_sampling = ni, 
                                  iter_warmup = nw)
@@ -344,7 +464,7 @@ We use leave-one-out cross-validation (LOO-CV); a Bayesian model evaluation proc
 ```{r loo}
 loos <- list()
 for(i in 1:length(model_fits)) {
-  loos[[i]] <- model_fits[[i]]$loo()
+  loos[[i]] <- model_fits[[i]]$loo(variables = "log_lik2", cores = 8)
 }
 
 names(loos) <- paste("model", 1:length(model_fits))
@@ -359,11 +479,10 @@ loo_compare_table <- loo::loo_compare(x = loos)
     tab_style(locations = cells_row_groups(), style = cell_text(weight = "bold"))
     
 ```
+
 ## Selecting the 'top' model  
 
 Based on the findings of loo and comparisons of other checks (posterior predictive checks, variation in posterior draws, plausibility of predictions), we see that all model perform similarly well using loo. However, several models produce predictions with lower levels of variation in the posterior predictions. Based on this, we use model 3 hereafter for analysis. This model has fixed effects of `r glue::glue_collapse(labels(terms(ab_formula_3)), sep = ", ", last = " and ")`. It also has a random effect of bioregion for each species and an over-dispersion parameter in the camera counts based on bioregion. This model does not have as many fixed effects as models 1 and 2, and also does not have a second random effect of EVC alongside bioregion (model 6). Unfortunately, the additional random effect of EVC produces much more variable and over-dispersed results for Red Deer, so we opt to use model 3 instead.   
-
-Models with half-normal or hazard functions perform similarly according to loo. We opt to use the half-normal function as the detection function produced appears more sensible for a large mammal like deer. There is some variation between the half-normal and hazard rates with half-normal having a slightly higher average detection probability for group sizes 1-5 up to 12.5m (HN: `r round(mean(model_fits[[3]]$summary("p")$mean), 2)`, HZ: `r round(mean(model_fits[[5]]$summary("p")$mean), 2)`). 
 
 ```{r AssignTopModel}
 # assign index for top model
@@ -845,7 +964,7 @@ av_det_rates %>%
 
 We can generate detection function plots that show how detection rates fall-off over varying distances. Initial exploration showed that there may be some relationship between herbaceous understorey and detection probability for Sambar Deer. However, when pooled together we see that herbaceous understorey appears to have no effect on detection.  
 
-```{r DistancePlots, fig.caption="Distance-sampling detection process for Sambar Deer (group size = 1-5 with adjusted availability). Herbaceous understorey cover in the area surrounding the camera does not appear to impact detection probability.", fig.width = 8, fig.height = 6, message = FALSE, warning=FALSE}
+```{r DistancePlots, fig.caption="Distance-sampling detection process for Deer (group size = 1). Herbaceous understorey cover in the area surrounding the camera does not appear to impact detection probability.", fig.width = 8, fig.height = 6, message = FALSE, warning=FALSE}
 site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
     dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
     dplyr::collect() %>%
@@ -903,15 +1022,14 @@ scaleHN <- det_curve_sum %>% filter(Distance == 1.5) %>% pull(median) %>% mean()
 
 y_comb_list <- list()
 for(i in 1:max(gs)) {
-y_comb_list[[i]] <- colSums(multispecies_data$y[,,i]) %>% # just for group size 1
+y_comb_list[[i]] <- colSums(multispecies_data$y[,,i]) %>% 
   as.data.frame() %>%
   `colnames<-`("Count") %>%
   mutate(Distance = midpts,
          Bin = 1:5,
          gs = i,
          Prop = Count/(max(Count)),
-         CountS = Count/pa[Bin,i],
-         PropS = CountS/max(CountS))
+         CountS = Count/pa[Bin,i])
 
 }
 
@@ -920,9 +1038,9 @@ y_combined <- bind_rows(y_comb_list) %>%
   mutate(SumCount = sum(Count)) %>%
   ungroup() %>%
   mutate(propC = Count/SumCount, 
-         PropSM = PropS * propC)  %>%
+         PropSM = (CountS/max(CountS)) * propC)  %>%
   group_by(Distance) %>% 
-  summarise(PropS = sum(PropSM))
+  summarise(PropS = sum(PropSM) * scaleHN)
 
 detection_plot_HN <- ggplot(aes(x = Distance), data = det_curve_sum) +
   geom_col(aes(y = PropS), fill = "grey70", colour = "grey20", width = 2.5, data = y_combined, alpha = 0.7) +

@@ -308,7 +308,9 @@ generated quantities {
   array[n_site, n_gs] real log_lik1;
   array[S, n_site, n_gs] real log_lik2;
   array[n_site, n_gs] real log_lik2_site;
+  array[S, n_site] real log_lik2_species;
   array[n_site] real log_lik;
+  array[n_site] real log_lik_det;
   //array[S, n_site] real Site_lambda;
   real av_gs[S];
   array[S] simplex[n_gs] eps_gs_ave;
@@ -339,10 +341,12 @@ for(n in 1:n_site) {
   log_lik2_site[n, j] = log_sum_exp(log_lik2[,n,j]);
     }
     // get loglik on a site level
-    log_lik[n] = log_sum_exp(log_sum_exp(log_sum_exp(log_lik1[n,]),
+    log_lik_det[n] = log_sum_exp(log_lik1[n,]);
+    log_lik[n] = log_sum_exp(log_sum_exp(log_lik_det[n],
     log_sum_exp(log_lik2_site[n,])), log_sum_exp(lp_site[,n]));
       for(s in 1:S) {
     //Site_lambda[s,n] = exp(log_lambda_psi[s,n]);
+    log_lik2_species[s, n] = log_sum_exp(log_sum_exp(log_lik2[s,n,]), lp_site[s,n]);
     N_site[s,n] = sum(n_obs_true[s,n,]);
     N_site_pred[s,n] = sum(n_obs_pred[s,n,]);
       }
@@ -354,7 +358,7 @@ for(n in 1:n_site) {
     }
   } else if(keyfun == 1) {
     for(j in 0:max_int_dist) { // get DS predictions for distance 0 to max bin distance
-    DetCurve[n, j+1] =  1 - exp(-(j+0.5/sigma[n])^(-theta)); //hazard rate
+    DetCurve[n, j+1] =  1 - exp(-((j+0.5)/sigma[n])^(-theta)); //hazard rate
     }
   }
 }

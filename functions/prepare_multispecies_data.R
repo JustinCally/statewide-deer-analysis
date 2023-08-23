@@ -10,6 +10,7 @@ prepare_model_data_multispecies <- function(species,
                                prediction_raster,
                                n_max_no_det,
                                n_max_det,
+                               crown_land,
                                evaltransects = TRUE,
                                snapshot_interval = 2,
                                filter_behaviour = TRUE) {
@@ -82,9 +83,11 @@ prepare_model_data_multispecies <- function(species,
 
   site_vars <- cams_curated %>%
     left_join(dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
+                mutate(Iteration = 1) %>%
     dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
     dplyr::collect() %>%
     dplyr::mutate(HerbaceousUnderstoryCover = NNWHUCover + ENWHUCover,
+                  Trail = factor(Trail),
                   SiteID = dplyr::case_when(SiteID == "47191" & CameraID == "HO04101053" ~ "47191A",
                                             SiteID == "47191" & CameraID != "HO04101053" ~ "47191B",
                                             TRUE ~ SiteID))) %>% # native + exotic herbaceous cover
@@ -198,7 +201,7 @@ prepare_model_data_multispecies <- function(species,
 
   if("PastureDistance" %in% colnames(vic_model_data_resampled_df)) {
     vic_model_data_resampled_df <- vic_model_data_resampled_df %>%
-      dplyr::mutate(PastureDistance = plyr::round_any(PastureDistance, 100, ceiling))
+      dplyr::mutate(PastureDistance = plyr::round_any(PastureDistance+0.0001, 100, ceiling))
   }
 
   # picker <-  function(x, viable_numbers) {
@@ -234,7 +237,17 @@ prepare_model_data_multispecies <- function(species,
 
   ab_model_pred_matrix <- ab_model_pred_matrix_full[(nrow(combined_spatial_data_fix)+1):nrow(ab_model_pred_matrix_full),]
   ab_model_matrix <- ab_model_pred_matrix_full[1:nrow(combined_spatial_data_fix),]
-  prop_pred <- rep(prod(res(vic_model_data_resampled))/1e6, nrow(ab_model_pred_matrix))
+
+  # Get offset, how much of each grid is public land
+  # group to raster_files
+  vic_raster <- terra::app(vic_model_data_resampled, mean)
+  nna <- which(!is.na(values(vic_raster)))
+  coverage <- exactextractr::coverage_fraction(vic_raster,
+                                               crown_land)
+
+  prop_pred <- values(coverage[[1]])[nna]
+
+  # prop_pred <- rep(prod(res(vic_model_data_resampled))/1e6, nrow(ab_model_pred_matrix))
 
   #### Coordinate data ####
   # coordinates
