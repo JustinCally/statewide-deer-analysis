@@ -255,6 +255,7 @@ These are the models used in the analysis. The first is an integrated model that
 
 ```{r models, echo = FALSE, warning=FALSE}
 model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"))
+model_negbin_ms2 <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_2.stan"))
 model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
 ```
 
@@ -272,7 +273,7 @@ snapshot_interval <- 2
 
   ### Get camera information for the camera sites
   ### For cameras that have problems you need to use the date from when the problem started
-  cams_curated <- dplyr::tbl(con, dbplyr::in_schema("camtrap", "curated_camtrap_operation")) %>%
+  cams_curated2 <- dplyr::tbl(con, dbplyr::in_schema("camtrap", "curated_camtrap_operation")) %>%
     dplyr::filter(ProjectShortName %in% !!project_short_name) %>% # Only retrieve cam records for hog deer 2023
     dplyr::collect() %>%
     dplyr::mutate(DateTimeDeploy = as.POSIXct(DateTimeDeploy),
@@ -314,7 +315,7 @@ snapshot_interval <- 2
   ### Tidy format for the records
   dcount<- camtrap_records_deer %>%
     dplyr::select(Species, SiteID, Distance, size, Date, Time, Behaviour) %>%
-    dplyr::full_join(cams_curated %>%
+    dplyr::full_join(cams_curated2 %>%
                        dplyr::select(SiteID, Tkt, Effort), by="SiteID") %>%
     dplyr::mutate(object=1:nrow(.)) %>%
     dplyr::mutate(size = if_else(is.na(size),0L, size)) %>%
@@ -333,9 +334,9 @@ snapshot_interval <- 2
     filter(size == 1)
   
   # site variables 
-    site_vars <- cams_curated %>%
+    site_vars <- cams_curated2 %>%
     left_join(dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
-    dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
+    dplyr::filter(SiteID %in% !!c(cams_curated2$SiteID, "47191")) %>%
     dplyr::collect() %>%
     dplyr::mutate(HerbaceousUnderstoryCover = scale(NNWHUCover + ENWHUCover),
                   WoodyUnderstoryCover = scale(NWUCover + EWUCover),
@@ -387,9 +388,12 @@ models_to_run <- data.frame(formula = c("ab_formula_1",
                                         "ab_formula_2",
                                         "ab_formula_3",
                                         "ab_formula_4",
-                                        "ab_formula_3"), 
-                            keyfun = c(1,1,1,1,1), 
-                            evc = c(F,F,F,F,T))
+                                        "ab_formula_3", 
+                                        "ab_formula_4",
+                                        "ab_formula_1",
+                                        "ab_formula_2"), 
+                            keyfun = c(1,1,1,1,1,1,1,1), 
+                            evc = c(F,F,F,F,T,T,T,T))
 ```
 
 ### Full Models  
@@ -464,7 +468,7 @@ We use leave-one-out cross-validation (LOO-CV); a Bayesian model evaluation proc
 ```{r loo}
 loos <- list()
 for(i in 1:length(model_fits)) {
-  loos[[i]] <- model_fits[[i]]$loo(variables = "log_lik2", cores = 8)
+  loos[[i]] <- model_fits[[i]]$loo(variables = "log_lik2_species", cores = 8)
 }
 
 names(loos) <- paste("model", 1:length(model_fits))
@@ -479,6 +483,26 @@ loo_compare_table <- loo::loo_compare(x = loos)
     tab_style(locations = cells_row_groups(), style = cell_text(weight = "bold"))
     
 ```
+
+Given that models are similar in there predictive performance at sampled sites we also evaluate the performance of predictions across unsampled sites. Below we see that more complex models (usually having a slighly better elpd), have poorer performance to unsampled areas and lead to unrealistic predictions. 
+
+```{r varCV}
+Nhat_CV <- list()
+for(i in 1:length(model_fits)) {
+  Nhat_CV[[i]] <- model_fits[[i]]$summary("Nhat", CV = ~ sd(.x)/mean(.x)) %>%
+    mutate(Model = i, Species = deer_species_all)
+}
+
+Nhat_CV_c <- bind_rows(Nhat_CV)
+
+Nhat_CV_c %>%
+  select(Model, Species, CV) %>%
+  kbl("html", escape=FALSE, caption = "Coefficients of Variation for Total Abundance estimates for the models assessed in the analysis") %>%
+  kable_styling() %>%
+  kableExtra::column_spec(3, background = ifelse(Nhat_CV_c$CV > 0.5, "red", ifelse(Nhat_CV_c$CV > 0.2, "orange", "green")), color = "white") %>%
+ collapse_rows(1) 
+```
+
 
 ## Selecting the 'top' model  
 
@@ -674,7 +698,7 @@ plot <- ggplot2::ggplot(data = densities) +
                              na.value = "transparent", na.translate = F,
                              name = "", guide = guide_legend(override.aes = list(size = 6))) +
   scale_alpha_continuous(range = c(0.5,1), guide = "none") +
-  labs(title = paste0('Density of ',species ,' Deer'), fill = bquote('Deer per'~km^2)) +
+  labs(title = paste0('Abundance of ',species ,' Deer'), fill = bquote('Deer per'~km^2)) +
   theme_bw() +
   theme(legend.text = element_text(size = 18), legend.key.size = unit(1, "cm"),
         title = element_text(size = 20))
@@ -778,7 +802,7 @@ terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds
                                                                         2, 
                                                                         mean, 
                                                                         na.rm = T, 
-                                                                        trim = 0.00125) #filter out highest draw
+                                                                        trim = 0.001) #filter out highest draw
 
 mean_raster[[i]] <- pred_raster
 mean_raster_discrete[[i]] <- mean_raster[[i]]
@@ -917,10 +941,15 @@ abundance_table <- function(model, regions, pred_area, caption, species_index) {
     kableExtra::row_spec(7, background = "#A5A1B5", color = "black", bold = T, hline_after = T)
 }
 
-abundance_table(model_fits[[top]], regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Sambar Deer Density", species_index = 1)
-abundance_table(model_fits[[top]], regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Fallow Deer Density", species_index = 2)
-abundance_table(model_fits[[top]], regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Red Deer Density", species_index = 3)
-abundance_table(model_fits[[top]], regions = reg, pred_area = table(multispecies_data$pred_reg), caption = "Regional estimates of Hog Deer Density", species_index = 4)
+pred_a_df <- data.frame(pred_reg = multispecies_data$pred_reg, 
+                        area = multispecies_data$prop_pred) %>%
+  group_by(pred_reg) %>%
+  summarise(area = sum(area))
+
+abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Sambar Deer Density", species_index = 1)
+abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Fallow Deer Density", species_index = 2)
+abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Red Deer Density", species_index = 3)
+abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Hog Deer Density", species_index = 4)
 ```
 
 # Model Covariates
@@ -964,7 +993,7 @@ av_det_rates %>%
 
 We can generate detection function plots that show how detection rates fall-off over varying distances. Initial exploration showed that there may be some relationship between herbaceous understorey and detection probability for Sambar Deer. However, when pooled together we see that herbaceous understorey appears to have no effect on detection.  
 
-```{r DistancePlots, fig.caption="Distance-sampling detection process for Deer (group size = 1). Herbaceous understorey cover in the area surrounding the camera does not appear to impact detection probability.", fig.width = 8, fig.height = 6, message = FALSE, warning=FALSE}
+```{r DistancePlots, fig.cap="Distance-sampling detection process for Deer (group size = 1-5). Herbaceous understorey cover in the area surrounding appears to have some impact on detection probability", fig.width = 8, fig.height = 6, message = FALSE, warning=FALSE}
 site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
     dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
     dplyr::collect() %>%
@@ -1500,3 +1529,6 @@ cowplot::plot_grid(plot_deer_relationship(plot_list[[1]], plot_list_50[[1]], "Ba
 
 ```
 
+# Analysis Summary
+
+Our studies detected deer at `r sum(rowSums(multispecies_data$n_obs)>0)`/`r multispecies_data$n_site` cameras across Victoria and some form of deer sign (camera or transect) at `r sum(colSums(multispecies_data$any_seen)>0)`/`r multispecies_data$n_site` sites. Our average estimates of deer density at the `r multispecies_data$n_site` sites ranged from 0 to `r round(max(bind_rows(site_deer_predictions)$mean),1)` deer per km^2^. Across approximately 74,570 km2 of public land in Victoria we estimate total deer abundance of the four species investigated in this study (Sambar, Fallow, Red and Hog) at `r formatC(model_fits[[top]]$summary("Nhat_sum")$mean, digits = 0, big.mark = ",", format = "f")` (90 % CI: `r formatC(model_fits[[top]]$summary("Nhat_sum")$q5, digits = 0, big.mark = ",", format = "f")` - `r formatC(model_fits[[top]]$summary("Nhat_sum")$q95, digits = 0, big.mark = ",", format = "f")`. We also find plausible links between deer abundance and increased presence of exotic weed species. 
