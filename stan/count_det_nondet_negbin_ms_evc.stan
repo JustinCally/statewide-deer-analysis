@@ -372,6 +372,10 @@ for(i in 1:npc) {
     //pred_trunc[s,i] = max(N_site[s,]);
     trunc_counter[s] += 1;
   }
+  // for Hog Deer limit to Gippsland region
+  if(pred_reg[i] != 2 && s == 4) {
+    pred[s,i] = 0;
+  }
   Nhat_reg[s,pred_reg[i]] += pred[s,i];
 }
 Nhat[s] = sum(pred[s,]);

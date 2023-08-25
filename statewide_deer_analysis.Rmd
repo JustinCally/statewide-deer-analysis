@@ -99,6 +99,7 @@ library(VicmapR)
 library(kableExtra)
 library(brms)
 library(Distance)
+library(ggrepel)
 options(brms.backend = "cmdstanr")
 check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
 register_knitr_engine(override = FALSE)
@@ -255,7 +256,6 @@ These are the models used in the analysis. The first is an integrated model that
 
 ```{r models, echo = FALSE, warning=FALSE}
 model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"))
-model_negbin_ms2 <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_2.stan"))
 model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
 ```
 
@@ -646,7 +646,7 @@ Within the STAN model we generate predictions for sampled and un-sampled locatio
 
 ### Site-based Prediction Map
 
-Visualisation of point-estimates for the various deer species surveyed for in this study.
+Below we plot visualisations of point-estimates for the various deer species surveyed for in this study.
 
 ```{r SiteMap, fig.height = 18, fig.width = 8, fig.cap = "Site-level density estimates for all sites sampled as part of statewide and hog deer surveys. Point-density estimates are from trimmed means of the posterior draws (trimming of the top and bottom 1% of draws)"}
 vic_regions <- vicmap_query("open-data-platform:delwp_region") %>%
@@ -661,7 +661,7 @@ delwp_pal <- colorRampPalette(c("#B9C600",
 
 site_preds <- function(model, cams_curated, species_index) {
   
-rn_dens <- model$summary("N_site", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures(), posterior::default_convergence_measures())
+rn_dens <- model$summary("N_site", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), CV = ~sd(.)/mean(.), posterior::default_summary_measures(), posterior::default_convergence_measures())
   
 which_sp <- which(stringr::str_detect(string = rn_dens$variable,
                                          pattern = paste0("N_site\\[",
@@ -724,6 +724,8 @@ site_density_plot(fallow_preds, vic_regions, species = "Fallow"),
 site_density_plot(red_preds, vic_regions, species = "Red"), 
 site_density_plot(hog_preds, vic_regions, species = "Hog"), ncol = 1)
 ```
+
+Average density estimates varied across sites for all four species. Sambar deer were the most commonly detected species on the camera traps (`r sum(rowSums(multispecies_data$n_obs[,,1]) > 0)`/`r multispecies_data$n_site` sites), and density estimates at sites ranged from `r round(min(site_deer_predictions$Sambar$mean),1)` to `r round(max(site_deer_predictions$Sambar$mean),2)` deer/km^2^, for fallow, fewer site detections (`r sum(rowSums(multispecies_data$n_obs[,,2]) > 0)`), but more variability in site density gave a range between `r round(min(site_deer_predictions$Fallow$mean),2)` and `r round(max(site_deer_predictions$Fallow$mean),2)` deer/km^2^. Red deer were only detected on `r sum(rowSums(multispecies_data$n_obs[,,3]) > 0)` sites with densities ranging from `r round(min(site_deer_predictions$Red$mean),2)` to `r round(max(site_deer_predictions$Red$mean),2)`. Finally, Hog Deer, which were only detected on `r sum(rowSums(multispecies_data$n_obs[,,4]) > 0)` cameras in South Gippsland, had site densities ranging from `r round(min(site_deer_predictions$Hog$mean),2)` to `r round(max(site_deer_predictions$Hog$mean),2)` deer/km^2^.
 
 ### Site-density Summaries
 
@@ -867,7 +869,7 @@ plot_abundance <- function(raster, state, species, crop = NULL) {
     tidyterra::geom_spatraster(data = raster, na.rm = T) + 
     # tidyterra::scale_fill_terrain_d(na.translate = FALSE) + 
     ggplot2::scale_fill_manual(values = delwp_pal(lvls), na.value = "transparent", na.translate = F) +
-    ggplot2::labs(fill = bquote('Deer per'~km^2), title = paste0("Average Density of ", species, " on Victorian Public Land")) + 
+    ggplot2::labs(fill = bquote('Deer per'~km^2), title = paste0("Average Abundance of ", species, " on Victorian Public Land")) + 
     ggspatial::annotation_scale() +
     delwp_theme()
   
@@ -897,6 +899,8 @@ ggsave(plot = red_abundance_plot, filename = "outputs/plots/red_abundance_plot.p
 ggsave(plot = hog_abundance_plot, filename = "outputs/plots/hog_abundance_plot.png", 
        width = 2400, height = 1600, units = "px")
 
+ggsave(plot = cowplot::plot_grid(sambar_abundance_plot, fallow_abundance_plot, red_abundance_plot, hog_abundance_plot, ncol = 2, labels = "AUTO", greedy = F), filename = "outputs/plots/all_abundance_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
+
 cowplot::plot_grid(sambar_abundance_plot, fallow_abundance_plot, red_abundance_plot, hog_abundance_plot, ncol = 1)
 ```
 
@@ -912,7 +916,7 @@ reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
     dplyr::ungroup() %>%
     dplyr::mutate(delwp_region_fact = as.integer(factor(delwp_region))) 
 
-abundance_table <- function(model, regions, pred_area, caption, species_index) {
+abundance_table <- function(model, regions, pred_area, caption, species_index, return_data = F) {
   
   reg <- model$summary("Nhat_reg", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures(), posterior::default_convergence_measures())
   
@@ -934,6 +938,18 @@ abundance_table <- function(model, regions, pred_area, caption, species_index) {
                   `Area km2`,
                   `Average Density (per km2)`)
   
+  if(return_data) {
+    
+ if(species_index == 4) {
+    regional_abundance <- regional_abundance %>% 
+      filter(Region == "GIPPSLAND")
+  }
+    
+    return(regional_abundance %>% 
+             mutate(Species = species_names[species_index], across(2:8, ~ formatC(.x, digits = 0, format = "f", big.mark = ",") )) %>%
+             select(Species, everything()))
+  }
+  
   kableExtra::kbl(regional_abundance, digits = 2, format = "html", caption = caption, format.args = list(big.mark = ",")) %>%
     kableExtra::kable_styling("striped") %>%
     kableExtra::column_spec(1, bold = TRUE) %>%
@@ -946,10 +962,18 @@ pred_a_df <- data.frame(pred_reg = multispecies_data$pred_reg,
   group_by(pred_reg) %>%
   summarise(area = sum(area))
 
+# Save Abundance Table 
+all_ab_tab <- bind_rows(abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, species_index = 1, return_data = T), 
+                        abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, species_index = 2, return_data = T),
+                        abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, species_index = 3, return_data = T), 
+                        abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, species_index = 4, return_data = T))
+
+write.csv(all_ab_tab, "outputs/tables/regional_abundance_estimates.csv")
+
 abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Sambar Deer Density", species_index = 1)
 abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Fallow Deer Density", species_index = 2)
 abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Red Deer Density", species_index = 3)
-abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Hog Deer Density", species_index = 4)
+abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Hog Deer Density", species_index = 4) 
 ```
 
 # Model Covariates
@@ -1092,7 +1116,7 @@ detection_plot_HN
 
 For Sambar, Fallow and Red Deer we were able to estimate detection rates of the various methods used to detect deer (camera, footprints, pellets, rubbings and wallows).
 
-```{r detectionplots, fig.width=8, fig.height=5, fig.cap="Detection Probability for the various methods of survey. Camera trap detection probability is based on average deployment length (53 days), while transects are based on 3 independent transect searches", warnings = FALSE, message = FALSE}
+```{r detectionplots, fig.width=8, fig.height=5, fig.cap="Unconditional detection probabilities for the various methods of survey, across various deer densities. Camera trap detection probability is based on average deployment length (53 days), while transects are based on 3 transect searches", warnings = FALSE, message = FALSE}
   
 all_draws <- model_fits[[top]]$draws("beta_trans_det", format = "df")
 
@@ -1190,9 +1214,12 @@ marginal_effects_plot_cmd_all(data_combined,
 
 ### Bioregion
 
-We used a spatially-derived random-effect of the bioregion of the sampled site. This random-effect allows us the ability to make predictions that include the variance associated with this random effect. This random-effect also minimises predictions in areas without deer detection's (e.g. the mallee).
+We used a spatially-derived random-effect of the bioregion of the sampled site. This random-effect allows us the ability to make predictions that include the variance associated with this random effect. This random-effect also minimises predictions in areas without deer detection's (e.g. the mallee).  
+
 
 ```{r bioregions, fig.height=24, fig.width = 5, fig.cap="Influence of the bioregion random effect on abundance (log-scale). "}
+bioregion_sd <- model_fits[[top]]$summary("bioregion_sd")
+
 bayesplot::color_scheme_set(bayes_theme)
 bioregion_contribution <- function(model, data, species, species_index) {
   eps_bioregion <- model$draws("eps_bioregion", format = "matrix")
@@ -1222,13 +1249,26 @@ for(i in 1:length(species_names)) {
 cowplot::plot_grid(plotlist = bio_plot_data, ncol = 1)
 ```
 
+Bioregion usually had a substantial impact on abundance estimates across the state. The variance (standard deviation) associated with the bioregion random effect was large for Sambar ($\sigma$ = `r round(bioregion_sd$mean[1],2)`, 90% CI: `r round(bioregion_sd$q5[1],2)` - `r round(bioregion_sd$q95[1],2)`), but less for Fallow ($\sigma$ = `r round(bioregion_sd$mean[2],2)`, 90% CI: `r round(bioregion_sd$q5[2],2)` - `r round(bioregion_sd$q95[2],2)`). Red Deer also exhibited large variance in the bioregion random effect ($\sigma$ = `r round(bioregion_sd$mean[3],2)`, 90% CI: `r round(bioregion_sd$q5[3],2)` - `r round(bioregion_sd$q95[3],2)`), as well Hog ($\sigma$ = `r round(bioregion_sd$mean[4],2)`, 90% CI: `r round(bioregion_sd$q5[4],2)` - `r round(bioregion_sd$q95[4],2)`). The larger variances for Hog, Red and Sambar reflect their more refined range boundaries, wheras Fallow show less clear range boundaries and thus show less variance across the state.   
+
+
 <!-- We can also visualise the average densities within each bioregion for the four species:   -->
 
 ```{r bioregiondensity, eval = FALSE, echo = FALSE, include = FALSE}
-bioregion_nhat <- model_fits[[top]]$summary("Nhat_bioreg", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures())
+
+```
+
+```{r, fig.height = 16, fig.width=24, warning = FALSE, fig.cap="Effect of Victorian Bioregions on abundance of deer"}
+# Bioregion map 
+bioregion_eff <- model_fits[[top]]$summary("eps_bioregion", posterior::default_summary_measures())
 
 bioreg <- VicmapR::vicmap_query("open-data-platform:vbioreg100") %>%
-    VicmapR::collect()
+    VicmapR::collect() %>%
+  group_by(bioregion, bioregion_code) %>%
+  summarise(geometry = st_union(geometry)) %>%
+  ungroup()
+
+bioregion_nhat <- model_fits[[top]]$summary("Nhat_bioreg", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures())
 
 bioregion_density <- list()
 
@@ -1245,11 +1285,59 @@ for(i in 1:length(species_names)) {
     mutate(`Average Density` = trimmed_mean/Area, 
            `Density (5%)` = q5/Area, 
            `Density (95%)` = q95/Area, 
-           `CV` = sd/trimmed_mean)
+           `CV` = sd/trimmed_mean, 
+           label = paste0(bioregion, " [D = "
+                          ,round(`Average Density`,2),
+                          " (",round(`Density (5%)`,2)," - ",round(`Density (95%)`, 2),")]"))
   
   bioregion_density[[i]] <- left_join(bioreg, bioregion_nhat_sp, by = "bioregion")
   
 }
+
+bioregion_effects <- list()
+
+for(i in 1:length(species_names)) {
+  which_sp <- which(stringr::str_detect(string = bioregion_eff$variable,
+                                         pattern = paste0("eps_bioregion\\[", i)))
+  
+  bioregion_eff_sp <- bioregion_eff[which_sp,]
+  
+  intercept <-  model_fits[[top]]$summary(paste0("beta_psi[",i,",1]"), mean = ~ mean(.))$mean
+  
+  bioregion_eff_sp$bioregion <- multispecies_data$bioreg_sf$bioregion 
+  bioregion_eff_sp$Area <- as.numeric(table(multispecies_data$pred_bioreg))
+  
+  bioregion_eff_sp <- bioregion_eff_sp %>% 
+    mutate(`Average Effect` = mean)
+  
+  bioregion_effects[[i]] <- left_join(bioreg, bioregion_eff_sp, by = "bioregion")
+  
+}
+
+bioregion_ggplot <- function(effect_df, title) {
+  ggplot(data = effect_df) +
+    geom_sf(data = state, linewidth = 0.5, fill = "grey90") +
+    geom_sf(aes(fill = `Average Effect`)) +
+    geom_label_repel(data = effect_df, aes(label = bioregion, fill = `Average Effect`, geometry = geometry), 
+                  size = 2.5, stat = "sf_coordinates", colour = "white") +
+    scale_fill_gradient2(low = "#B9C600",
+                         mid = delwp_cols[["Teal"]], 
+                         high = delwp_cols[["Navy"]], guide = guide_coloursteps(title = "Average Effect\n (log-scale)")) +
+    labs(title = title, x = "Longitude", y = "Latitude") +
+    ggspatial::annotation_scale() +
+    delwp_theme()
+}
+
+# cl_br <- st_intersection(crown_land, bioreg %>% filter(bioregion == "Bridgewater") %>% st_transform(3111))
+
+cpb <- cowplot::plot_grid(bioregion_ggplot(bioregion_effects[[1]], "Sambar"),
+bioregion_ggplot(bioregion_effects[[2]], "Fallow"),
+bioregion_ggplot(bioregion_effects[[3]], "Red"),
+bioregion_ggplot(bioregion_effects[[4]], "Hog"), labels = "AUTO", ncol = 2)
+
+ggsave(plot = cpb, filename = "outputs/plots/bioregion_effects_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
+
+cpb
 ```
 
 ```{r, eval = FALSE, include = FALSE}
@@ -1259,7 +1347,7 @@ site_grid_c <- st_read(dsn = con,
                      layer = Id(schema = "deervic", table = "curated_final_site_selection"))
 
 site_grid_filter <- site_grid %>% filter(frac_area >= 0.05)
-load("data/crown_layers_extent.rda")
+# load("data/crown_layers_extent.rda")
 
 site_grid_crop <- site_grid_filter %>% 
   st_intersection(crown_layers_extent)
@@ -1292,7 +1380,22 @@ site_grid_crop <- grid %>%
 
 ### Fixed-parameter Effects
 
-```{r FixedEffects, fig.height=10, fig.width = 14, warning = FALSE, message = FALSE, fig.cap="Marginal response curves for the various fixed-effect parameters used in the model."}
+```{r FixedEffects, fig.height=7, fig.width = 10, warning = FALSE, message = FALSE, fig.cap="Marginal response curves for the various fixed-effect parameters used in the model."}
+# beta_summaries 
+beta_summaries <- model_fits[[top]]$summary("beta_psi")
+format_cov <- function(sp, b, data = beta_summaries, variable = "beta_psi") {
+  fd <- data %>%
+    filter(variable == !!paste0(variable, "[", sp, ",",b+1,"]"))
+  
+  paste0("$\\beta$ = ",
+         round(fd$mean, 2), 
+        " [90% CI: ", 
+        round(fd$q5, 2), 
+        " – ",
+        round(fd$q95, 2),
+        "]")
+}
+
 ab_joined_list <- list()
 for(j in 1:length(species_names)) {
 beta_draws <- model_fits[[top]]$draws("beta_psi", format = "df")
@@ -1315,7 +1418,7 @@ phi_labs <- c("Bare Soil (%)",
               "Nitrogen (%)", 
               "Distance to Pastural Land (m)", 
               "Precipitation Seasonality", 
-              'Length of forest edge in 1km2 (m)')
+              'Forest Edge per km^2^ (m)')
 
 fac <- c(FALSE, FALSE, FALSE, FALSE, FALSE)
 
@@ -1323,7 +1426,7 @@ for(i in 1:length(phi_vars)) {
 ab_marginal_effects[[i]] <- marginal_effects_cmd(beta_draws, 
                                               param = "beta_psi", species_index = j,
                                               param_number = i+1, log = phi_logs[i],
-                                     model_data = multispecies_data[["raw_data"]], 
+                                     model_data = multispecies_data[["raw_data"]] %>% mutate(Nitrogen = Nitrogen*100), 
                                      abundance = TRUE,
                                      pwr = phi_sqrts[i],
                                      model_column = phi_vars[i], 
@@ -1339,17 +1442,27 @@ all_me_data <- bind_rows(ab_joined_list) %>%
                            param == "Nitrogen" ~ "Nitrogen (%)", 
                            param == "PastureDistance" ~ "Distance to Pastural Land (m)", 
                            param == "BIO15" ~ "Precipitation Seasonality", 
-                           param == "ForestEdge" ~ 'Amount of Forest Edge per km2 (m)'))
+                           param == "ForestEdge" ~ 'Forest Edge per km^2^ (m)'))
   
 
-marginal_effects_plot_cmd_all(all_me_data, 
+cov_plot <- marginal_effects_plot_cmd_all(all_me_data %>% mutate(species = factor(species, levels = species_names), 
+                                                     param = factor(param, levels = phi_labs)), 
                           col = "DarkGreen", 
                           factor = FALSE,
                           ylab = "Contribution to Abundance (log-scale)") +
       ggplot2::facet_grid(species~param, scales = "free") +
   delwp_theme() +
+  theme(strip.text = ggtext::element_markdown()) +
   xlab("Covariate Value")
+
+ggsave(plot = cov_plot, filename = "outputs/plots/abundance_covariate_effects.png", width = 3000, height = 2000, units = "px")
+
+cov_plot
+
 ```
+
+Of the five fixed-effect covariates used in the top model we found that all had tangible effects for one or more species. The direction and magnitude of these effects often varied between species. Bare soil had a slight positive effect on Sambar abundance (`r format_cov(1,1)`), negligible effect on Fallow (`r format_cov(2,1)`) and Red Deer (`r format_cov(3,1)`), and a slight negative effect on Hog Deer abundance (`r format_cov(4,1)`). Nitrogen generally had weaker, more variable effects. The effect of nitrogen was weakly positive for Sambar (`r format_cov(1,2)`), and Hog Deer (`r format_cov(4,2)`); but weakly negative for Fallow (`r format_cov(2,2)`), and Red Deer (`r format_cov(3,2)`). The effect of distance to pasture was consistently negative across all four species, which can also be interpreted as a prefence of deer to be 'closer' to pastural areas. However the effect of this covariate varied in magnitude for Sambar (`r format_cov(1,3)`), Fallow (`r format_cov(2,3)`), Red (`r format_cov(3,3)`), and Hog Deer (`r format_cov(4,3)`). Sambar Deer weakly favored areas with less seasonal variation in precipitation (`r format_cov(1,4)`), with Fallow (`r format_cov(2,4)`), Red (`r format_cov(3,4)`), and Hog Deer (`r format_cov(4,4)`) all showing positive relationships between precipitation seasonality and abundance. Lastly, we saw that the amount of forest edge in the landscape positively impacted abundance for Sambar (`r format_cov(1,5)`), and Fallow Deer (`r format_cov(2,5)`). This relationship was weakly negative for Red Deer (`r format_cov(3,5)`), and weakly positive for Hog Deer (`r format_cov(4,5)`).   
+
 # Additional Parameters of Interest
 
 Below is a table with several model parameters we estimated:  
@@ -1451,7 +1564,7 @@ site_density_df <- cams_curated %>%
 
 We use the `brms` package to run our model in a Bayesian framework [@brms1; @brms2; @brms3]. Our model is run in parallel on four cores over four chains for 1,000 sampling iterations per chain (1,000 warm up iterations). 
 
-```{r VegetationModel, eval = TRUE, echo = FALSE, results = 'hide', message=FALSE,warning=FALSE}
+```{r VegetationModel, eval = FALSE, echo = FALSE, results = 'hide', message=FALSE,warning=FALSE}
 bform1 <- bf(mvbind(BGroundCover, 
                     NWUCover, 
                     NNWHUCover, 
@@ -1486,6 +1599,8 @@ vegfit <- brm(bform1,
             iter = 2000, 
             warmup = 1000,
             backend = "cmdstanr")
+
+saveRDS(vegfit, "outputs/models/vegfit.rds")
 ```
 
 ## Model Results 
@@ -1495,12 +1610,40 @@ vegfit <- brm(bform1,
 Below we show a complete summary of the model, including all coefficients estimated for all the parameters and response variables. Standard deviations for the EVC random effect and the estimates of the $\phi$ parameter in the beta-distribution models, and the shape parameter in the negative binomial models are also shown. Note that all Rhats > 1.05 and all ESS > 200, suggesting good chain mixing and convergence.   
 
 ```{r VegOutcomes, warning = FALSE, out.width='1200px', size='small'}
+vegfit <- readRDS("outputs/models/vegfit.rds")
+veg_coefs <- fixef(vegfit, probs = c(0.05, 0.95), pars = c("BGroundCover_scalesqrtAllDeerDensity", 
+                                                             "NWUCover_scalesqrtAllDeerDensity", 
+                                                             "NNWHUCover_scalesqrtAllDeerDensity", 
+                                                             "Seedlings_scalesqrtAllDeerDensity", 
+                                                             "Saplings_scalesqrtAllDeerDensity", 
+                                                             "ExoticPresence_scalesqrtAllDeerDensity")) %>%
+  as.data.frame() %>%
+  mutate(Effect = paste0(c("Bare Ground Cover",
+                           "Native Woody Understorey Cover",
+                           "Native Non-woody Understorey Cover", 
+                           "Presence of seedlings",
+                           "Presence of saplings",
+                           "Presence of exotic flora"), " ~ Deer Density"))
+
+print_conditional <- function(x, i, d = 3, OR = FALSE) {
+  row <- x[i,]
+  name <- "\\beta"
+  if(OR) {
+    row <- row %>%
+      mutate(across(where(is.numeric), exp))
+    name <- "OR"
+  }
+  
+paste0("$",name,"$ = ", round(row[["Estimate"]], d), " [90% CI: ", round(row[["Q5"]], d), ", ", round(row[["Q95"]], d), "]")
+}
+
+
 summary(vegfit) 
 ```
 
 ### Deer Density Conditional Effects  
 
-Given our main interest in the model is deer density and how it impacts the suite of response variables, we generate marginal/conditional effects plots for the relationship between deer and the vegetation metric. Based on these plots we can see a "significant" (confidence intervals not-overlapping zero) effect of deer density on: bare ground (-ve), native woody understorey (-ve),  native non-woody/herbaceous understorey (+ve), and presence of exotic species (+ve).  
+Given our main interest in the model is deer density and how it impacts the suite of response variables, we generate marginal/conditional effects plots for the relationship between deer and the vegetation metric. Based on these plots we can see a "significant" (confidence intervals not-overlapping zero) effect of deer density on: bare ground (-ve), native woody understorey (-ve), native non-woody/herbaceous understorey (+ve), and presence of exotic species (+ve):  
 
 ```{r VegPlots, fig.width = 10, fig.height=12, fig.cap="Impact of deer density on a range of vegetation measure, including (A) bare ground cover, (B) native woody understorey, (C) native herbaceous understorey cover, (D) seedlings, (E) saplings, and (F) th presence of exotic species. The line shows the mean estimate, with the shading representing 50% and 90% confidence intervals."}
 plot_list <- conditional_effects(vegfit, effects = "AllDeerDensity", prob = 0.9)
@@ -1515,19 +1658,27 @@ plot_deer_relationship <- function(plot_data, plot_data_50, yaxis) {
     geom_smooth(aes(x = AllDeerDensity, y = `estimate__`), 
                 colour = delwp_cols[["Navy"]], method = "loess", formula = y~x) +
     ylab(paste(yaxis)) +
-    delwp_theme()
+    xlab("Deer Density (per km^2^)") +
+    delwp_theme() +
+    theme(axis.title.x = ggtext::element_markdown())
     
 }
 
-cowplot::plot_grid(plot_deer_relationship(plot_list[[1]], plot_list_50[[1]], "Bare Ground Cover"), 
+vegplot <- cowplot::plot_grid(plot_deer_relationship(plot_list[[1]], plot_list_50[[1]], "Bare Ground Cover"), 
                    plot_deer_relationship(plot_list[[2]], plot_list_50[[2]], "Native Woody Understorey Cover"),
                    plot_deer_relationship(plot_list[[3]], plot_list_50[[3]], "Native Herbaceous Understorey Cover"),
                    plot_deer_relationship(plot_list[[4]], plot_list_50[[4]], "Seedling Counts") + scale_y_sqrt(),
                    plot_deer_relationship(plot_list[[5]], plot_list_50[[5]], "Sapling Counts"),
                    plot_deer_relationship(plot_list[[6]], plot_list_50[[6]], "Presence of Exotic Flora"), 
-                   ncol = 2, labels = "AUTO")
+                   ncol = 3, labels = "AUTO")
+
+ggsave(plot = vegplot, filename = "outputs/plots/vegetation_effects_plot.png", width = 3400, height = 2200, units = "px")
+
+vegplot
 
 ```
+
+We found deer density to have several plausible relationships with several structural vegetation componentsw, including negative relationships with bare ground cover (`r print_conditional(veg_coefs, 1)`), native woody understorey cover (`r print_conditional(veg_coefs, 2)`), and a positive relationship with native non-woody/herbacous understorey cover (`r print_conditional(veg_coefs, 3)`). We also found strong evidence suggesting the presence of weeds is more likely at sites with higher densities of deer (`r print_conditional(veg_coefs, i = 6, OR = F)`, `r print_conditional(veg_coefs, i = 6, OR = T)`). We did not find tangible relationships between deer abundance and seedling or sapling counts.   
 
 # Analysis Summary
 

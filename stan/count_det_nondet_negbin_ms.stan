@@ -358,8 +358,11 @@ for(i in 1:np_bioreg) Nhat_bioreg[s,i] = 0;
 for(i in 1:npc) {
   pred[s,i] = neg_binomial_2_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]], od[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
   if(pred[s,i] > max(N_site[s,])) {
-    //pred_trunc[s,i] = max(N_site[s,]);
     trunc_counter[s] += 1;
+  }
+  // for Hog Deer limit to Gippsland region
+  if(pred_reg[i] != 2 && s == 4) {
+    pred[s,i] = 0;
   }
   Nhat_reg[s,pred_reg[i]] += pred[s,i];
   Nhat_bioreg[s,pred_bioreg[i]] += pred[s,i];
