@@ -908,7 +908,23 @@ cowplot::plot_grid(sambar_abundance_plot, fallow_abundance_plot, red_abundance_p
 
 For each DEECA region we provide species-level estimates of abundance with 90 % confidence interval. We also calculate the model-based average density within each region based on the abundance and the total area of public land within each region.
 
+
 ```{r RegAbundance}
+Nhat_sum <- model_fits[[top]]$summary("Nhat")
+
+format_nhat <- function(sp, data = Nhat_sum) {
+  fd <- data %>%
+    filter(variable == !!paste0("Nhat[", sp, "]"))
+  
+  paste0("$\\hat N$ = ",
+         formatC(fd$mean, digits = 0, big.mark = ",", format = "f"), 
+        " [90% CI: ", 
+        formatC(fd$q5, digits = 0, big.mark = ",", format = "f"), 
+        " – ",
+        formatC(fd$q95, digits = 0, big.mark = ",", format = "f"),
+        "]")
+}
+
 reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
     VicmapR::collect() %>%
     dplyr::group_by(delwp_region) %>%
@@ -975,6 +991,8 @@ abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, ca
 abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Red Deer Density", species_index = 3)
 abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Hog Deer Density", species_index = 4) 
 ```
+
+The total estimated number of Sambar deer in Victoria was estimated at `r format_nhat(1)`, followed by Fallow deer at `r format_nhat(2)`, Red deer (`r format_nhat(3)`), and Hog Deer (`r format_nhat(4)`). 
 
 # Model Covariates
 
@@ -1645,7 +1663,7 @@ summary(vegfit)
 
 Given our main interest in the model is deer density and how it impacts the suite of response variables, we generate marginal/conditional effects plots for the relationship between deer and the vegetation metric. Based on these plots we can see a "significant" (confidence intervals not-overlapping zero) effect of deer density on: bare ground (-ve), native woody understorey (-ve), native non-woody/herbaceous understorey (+ve), and presence of exotic species (+ve):  
 
-```{r VegPlots, fig.width = 10, fig.height=12, fig.cap="Impact of deer density on a range of vegetation measure, including (A) bare ground cover, (B) native woody understorey, (C) native herbaceous understorey cover, (D) seedlings, (E) saplings, and (F) th presence of exotic species. The line shows the mean estimate, with the shading representing 50% and 90% confidence intervals."}
+```{r VegPlots, fig.width = 10, fig.height=8, fig.cap="Impact of deer density on a range of vegetation measure, including (A) bare ground cover, (B) native woody understorey, (C) native herbaceous understorey cover, (D) seedlings, (E) saplings, and (F) th presence of exotic species. The line shows the mean estimate, with the shading representing 50% and 90% confidence intervals."}
 plot_list <- conditional_effects(vegfit, effects = "AllDeerDensity", prob = 0.9)
 plot_list_50 <- conditional_effects(vegfit, effects = "AllDeerDensity", prob = 0.5)
 
@@ -1656,7 +1674,7 @@ plot_deer_relationship <- function(plot_data, plot_data_50, yaxis) {
     geom_ribbon(aes(x = AllDeerDensity, ymin = `lower__`, ymax = `upper__`), 
                 fill = delwp_cols[["Navy"]], alpha = 0.3, data = plot_data_50) +
     geom_smooth(aes(x = AllDeerDensity, y = `estimate__`), 
-                colour = delwp_cols[["Navy"]], method = "loess", formula = y~x) +
+                colour = delwp_cols[["Navy"]], method = "loess", formula = y~x, size = 2) +
     ylab(paste(yaxis)) +
     xlab("Deer Density (per km^2^)") +
     delwp_theme() +
