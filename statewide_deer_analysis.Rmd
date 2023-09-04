@@ -1598,11 +1598,13 @@ key_params %>%
 
 ### Dispersion  
 
+Below we show the parameter estimates for the dispersion parameters estimated within our negative binomial models for camera counts and Royle-Nichols model. 
+
 ```{r Dispersion}
 dispersion_data <- model_fits[[top]]$summary(c("od", "odRN")) %>%
   mutate(species = c(species_names, "All"), 
          model = c(rep("Camera count", 4), "Royle-Nichols"), 
-         parameter = c("$$\\phi_1$$", "$$\\phi_2$$", "$$\\phi_3$$", "$$\\phi_4$$", "$$\\bar \\phi$$")) %>%
+         parameter = c("$\\phi_1$", "$\\phi_2$", "$\\phi_3$", "$\\phi_4$", "$\\bar \\phi$")) %>%
   select(model, species, parameter, mean, sd, q5, q95)
 
 format_od <- function(data) {
@@ -1831,7 +1833,29 @@ Our studies detected deer at `r sum(rowSums(multispecies_data$n_obs)>0)`/`r mult
 
 # Comparisons to other studies  
 
-```{r}
+Below we show a table of studies that have previously estimated deer density in Australia. 
+
+```{r OtherStudiesTable}
+abundance_studies <- readr::read_csv("data/Australian_Deer_Studies_Density_Estimates.csv") %>%
+  mutate(`Density LB` = as.numeric(stringr::str_trim(`Density Min`)), 
+            `Density UB` = as.numeric(stringr::str_trim(`Density Max`)))
+
+abundance_table_present <- abundance_studies %>%
+  transmute(State, Species, Title, Author, `Study Sites`, `Year Start`, 
+            `Year End`, `Density Mean`, `Density LB`, 
+            `Density UB`) %>%
+  arrange(State, Species, Title, `Study Sites`)
+
+write.csv(abundance_table_present, "outputs/tables/other_studies.csv", row.names = FALSE)
+
+abundance_table_present %>% 
+  kbl("html", digits = 3) %>%
+  kable_styling("striped") %>%
+  collapse_rows(1:3)
+```
+
+
+```{r, echo = FALSE, include = FALSE, eval = FALSE}
 asot_areas <- st_read("data/asot_operational_areas")
 asot_abundance <- exactextractr::exact_extract(combined_raster[[1:2]], y = asot_areas, "sum") %>%
   `names<-`(c("Sambar_N", "Fallow_N"))
