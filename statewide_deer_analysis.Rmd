@@ -1776,6 +1776,12 @@ print_conditional <- function(x, i, d = 3, OR = FALSE) {
 paste0("$",name,"$ = ", round(row[["Estimate"]], d), " [90% CI: ", round(row[["Q5"]], d), ", ", round(row[["Q95"]], d), "]")
 }
 
+veg_coefs_save <- veg_coefs %>%
+  transmute(effect = Effect, mean = Estimate, sd = Est.Error, `5 %` = Q5, `95 %` = Q95) %>%
+  mutate(across(where(is.numeric), round, 3))
+
+write.csv(veg_coefs_save, "outputs/tables/veg_coefs.csv", row.names = F)
+
 
 summary(vegfit) 
 ```
@@ -1784,7 +1790,7 @@ summary(vegfit)
 
 Given our main interest in the model is deer density and how it impacts the suite of response variables, we generate marginal/conditional effects plots for the relationship between deer and the vegetation metric. Based on these plots we can see a "significant" (confidence intervals not-overlapping zero) effect of deer density on: bare ground (-ve), native woody understorey (-ve), native non-woody/herbaceous understorey (+ve), and presence of exotic species (+ve):  
 
-```{r VegPlots, fig.width = 10, fig.height=8, fig.cap="Impact of deer density on a range of vegetation measure, including (A) bare ground cover, (B) native woody understorey, (C) native herbaceous understorey cover, (D) seedlings, (E) saplings, and (F) th presence of exotic species. The line shows the mean estimate, with the shading representing 50% and 90% confidence intervals."}
+```{r VegPlots, fig.width = 10, fig.height=8, fig.cap="Impact of deer density on a range of vegetation measure, including (A) bare ground cover, (B) native woody understorey, (C) native herbaceous understorey cover, (D) seedlings, (E) saplings, and (F) th presence of exotic species. The line shows the mean estimate, with the shading representing 50% and 90% confidence intervals. Inner and outer shading represents 50% and 90% confidence levels respectively."}
 plot_list <- conditional_effects(vegfit, effects = "AllDeerDensity", prob = 0.9)
 plot_list_50 <- conditional_effects(vegfit, effects = "AllDeerDensity", prob = 0.5)
 
