@@ -3,6 +3,8 @@ library(sf)
 library(galah)
 library(terra)
 library(raster)
+library(weda)
+library(dbplyr)
 galah_config(email = "justin.cally@delwp.vic.gov.au")
 
 con <- weda_connect(password = keyring::key_get(service = "ari-dev-weda-psql-01",
@@ -22,7 +24,7 @@ area <- vic_bound %>%
 
 if(!file.exists("data/historic_deer_ala_records.rds")) {
   historic_deer_ala_records <- galah_call() %>%
-    galah_identify(c("Cervus unicolor", "Dama dama", "Cervus elaphas")) %>%
+    galah_identify(c("Cervus unicolor", "Dama dama", "Cervus elaphas", "Axis porcinus")) %>%
     galah::galah_geolocate(area) %>%
     galah_filter(year >= 2003) %>%
     atlas_occurrences() %>%
@@ -47,7 +49,7 @@ smoothed_kernel_species <- function(sr, all_area = vic_bound) {
                        extent = terra::ext(all_area))
 
   pred_vals <- raster::extract(points_kde, hist_3111)
-  q995 <- quantile(pred_vals, 0.001, na.rm = T)
+  q995 <- quantile(pred_vals, 0.005, na.rm = T)
 
   points_kde_cut <- points_kde
   terra::values(points_kde_cut)[terra::values(points_kde_cut) >= q995] <- as.factor("1")
@@ -66,7 +68,7 @@ deer_kde <- lapply(split_deer_records, smoothed_kernel_species) %>%
 names(deer_kde) <- paste(names(deer_kde), "distribution")
 
 #### For the transect data assign it to the three species ####
-deer_species <- c("Sambar Deer", "Fallow Deer", "Red Deer")
+deer_species <- c("Sambar Deer", "Fallow Deer", "Red Deer", "Hog Deer")
 project_short_name <- c("hog_deer_2023", "StatewideDeer")
 
 raw_transects <- tbl(con, dbplyr::in_schema(schema = "deervic", table = "raw_site_transects")) %>%
@@ -86,6 +88,8 @@ presence_absence_wide <- presence_absence %>%
   st_drop_geometry() %>%
   left_join(presence_absence %>% dplyr::select(SiteID) %>% distinct()) %>%
   st_as_sf()
+
+presence_absence_wide$`Axis porcinus`[is.na(presence_absence_wide$`Axis porcinus`)] <- 0
 
 species_overlap <- bind_cols(presence_absence_wide,
                              terra::extract(deer_kde, vect(presence_absence_wide %>%
@@ -126,11 +130,12 @@ transects_long <- tbl(con, dbplyr::in_schema(schema = "deervic", table = "raw_si
 
 transects_sp <- left_join(transects_long, species_overlap, by = "SiteID")
 
-Damadama_Detection <- detection_assign(transects_sp, "Dama dama", othersp = c("Cervus unicolor", "Cervus elaphus"))
-Rusaunicolor_Detection <- detection_assign(transects_sp, "Cervus unicolor", othersp = c("Dama dama", "Cervus elaphus"))
-Cervuselaphus_Detection <- detection_assign(transects_sp, "Cervus elaphus", othersp = c("Dama dama", "Cervus unicolor"))
-
+Damadama_Detection <- detection_assign(transects_sp, "Dama dama", othersp = c("Cervus unicolor", "Cervus elaphus", "Axis porcinus"))
+Rusaunicolor_Detection <- detection_assign(transects_sp, "Cervus unicolor", othersp = c("Dama dama", "Cervus elaphus", "Axis porcinus"))
+Cervuselaphus_Detection <- detection_assign(transects_sp, "Cervus elaphus", othersp = c("Dama dama", "Cervus unicolor", "Axis porcinus"))
+Axisporcinus_Detection <- detection_assign(transects_sp, "Axis porcinus", othersp = c("Dama dama", "Cervus unicolor", "Cervus elaphus"))
 # save with underscroe and VBA species name
-saveRDS(Damadama_Detection, "data/Dama_dama_Detection.rds")
-saveRDS(Rusaunicolor_Detection, "data/Cervus_unicolor_Detection.rds")
-saveRDS(Cervuselaphus_Detection, "data/Cervus_elaphus_Detection.rds")
+saveRDS(Damadama_Detection, "data/transects/Dama_dama_Detection.rds")
+saveRDS(Rusaunicolor_Detection, "data/transects/Cervus_unicolor_Detection.rds")
+saveRDS(Cervuselaphus_Detection, "data/transects/Cervus_elaphus_Detection.rds")
+saveRDS(Axisporcinus_Detection, "data/transects/Axis_porcinus_Detection.rds")

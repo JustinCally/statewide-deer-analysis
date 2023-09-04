@@ -146,8 +146,6 @@ parameters {
   array[S] real<lower=0> grp_sd;
   // od
   array[S] real od_mu;
-  array[S] real<lower=0> od_sd;
-  array[S] vector[np_bioreg] od_raw;
   real odRNmu;
 }
 
@@ -177,15 +175,15 @@ transformed parameters {
   array[S, n_site] vector[n_gs] epsi;
   array[S] matrix[n_site, n_gs] eps_site;
   real<lower=0> theta = exp(log_theta);
-  array[S] vector[np_bioreg] od; // bioregion random effect
+  array[S] real od; // bioregion random effect
   real odRN = exp(odRNmu);  // bioregion random effect
   array[S, n_site] real<lower=0, upper=1> pbar;
 
   for(s in 1:S) {
     for(b in 1:np_bioreg) {
     eps_bioregion[s,b] = bioregion_sd[s] * bioregion_raw[s,b];
-    od[s,b] = exp(od_mu[s] + od_sd[s] * od_raw[s,b]);
   }
+    od[s] = exp(odRNmu + od_mu[s]);
   for(k in 1:np_evc) {
   eps_evc[s,k] = evc_sd * evc_raw[s,k];
 }
@@ -237,7 +235,7 @@ for(n in 1:n_site) {
     p[n,j] = exp(log_p[n,j]);
     // model site abundance
     for(s in 1:S) {
-    lambda[s,n,j] = exp(log_lambda_psi[s,n] + log_p[n,j] + log_activ + log(eps_ngs[s,n,j]) + log(pbar[s,n])) .* survey_area[n];
+    lambda[s,n,j] = exp(log_lambda_psi[s,n] + log_p[n,j] + log_activ + log(eps_ngs[s,n,j])) .* survey_area[n];
     }
   }
 
@@ -273,9 +271,7 @@ model {
     grp_sd[s] ~ normal(0, 1);
     zeta[s,] ~ normal(0, 2);
     // od
-    od_sd[s] ~ normal(0,1);
     od_mu[s] ~ normal(0,1);
-    od_raw[s,] ~ normal(0,1);
     // evc re
     evc_raw[s,] ~ normal(0,1);
   }
@@ -289,7 +285,7 @@ model {
   for(n in 1:n_site) {
   for(j in 1:n_gs) {
   for(s in 1:S) {
-  target += neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s, site_bioreg[n]]);
+  target += neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s]);
         }
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
@@ -334,9 +330,9 @@ for(n in 1:n_site) {
   for(j in 1:n_gs) {
   log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
   for(s in 1:S) {
-  log_lik2[s,n,j] = neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s, site_bioreg[n]]); //for loo
-  n_obs_true[s, n, j] = gs[j] * (neg_binomial_2_log_rng(log_lambda_psi[s,n] + log(eps_ngs[s,n,j]), od[s, site_bioreg[n]]));
-  n_obs_pred[s, n,j] = gs[j] * neg_binomial_2_rng(lambda[s,n,j], od[s, site_bioreg[n]]);
+  log_lik2[s,n,j] = neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s]); //for loo
+  n_obs_true[s, n, j] = gs[j] * (neg_binomial_2_log_rng(log_lambda_psi[s,n] + log(eps_ngs[s,n,j]), od[s]));
+  n_obs_pred[s, n,j] = gs[j] * neg_binomial_2_rng(lambda[s,n,j], od[s]);
   }
   log_lik2_site[n, j] = log_sum_exp(log_lik2[,n,j]);
     }
@@ -367,7 +363,7 @@ for(s in 1:S) {
 for(i in 1:np_reg) Nhat_reg[s,i] = 0;
 
 for(i in 1:npc) {
-  pred[s,i] = neg_binomial_2_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]] + eps_evc[s, pred_evc[i]], od[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
+  pred[s,i] = neg_binomial_2_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]] + eps_evc[s, pred_evc[i]], od[s]) * prop_pred[i] * av_gs[s]; //offset
   if(pred[s,i] > max(N_site[s,])) {
     //pred_trunc[s,i] = max(N_site[s,]);
     trunc_counter[s] += 1;

@@ -47,3 +47,11 @@ outputs/models/fit_multispecies_6.rds
 outputs/models/fit_multispecies_7.rds
 data/crown_land.rds
 outputs/models/fit_multispecies_8.rds
+data/asot_operational_areas/asot_operational_area_tracks.dbf
+data/asot_operational_areas/asot_operational_area_tracks.prj
+data/asot_operational_areas/asot_operational_area_tracks.shp
+data/asot_operational_areas/asot_operational_area_tracks.shx
+data/asot_operational_areas/asot_operational_areas.dbf
+data/asot_operational_areas/asot_operational_areas.prj
+data/asot_operational_areas/asot_operational_areas.shp
+data/asot_operational_areas/asot_operational_areas.shx

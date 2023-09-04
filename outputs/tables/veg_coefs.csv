@@ -1,0 +1,7 @@
+"effect","mean","sd","5 %","95 %"
+"Bare Ground Cover ~ Deer Density",-0.04,0.028,-0.088,0.005
+"Native Woody Understorey Cover ~ Deer Density",-0.046,0.026,-0.09,-0.004
+"Native Non-woody Understorey Cover ~ Deer Density",0.066,0.028,0.02,0.113
+"Presence of seedlings ~ Deer Density",0.057,0.071,-0.056,0.176
+"Presence of saplings ~ Deer Density",-0.012,0.058,-0.109,0.083
+"Presence of exotic flora ~ Deer Density",0.157,0.074,0.041,0.281

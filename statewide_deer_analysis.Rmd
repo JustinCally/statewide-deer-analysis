@@ -554,7 +554,7 @@ ppc_sambar <- list()
 for(i in 1:length(funs)) {
 ppc_sambar[[i]] <- posterior_checks_multispecies(model = model_fits[[top]], 
                  model_data = multispecies_data, species_index = 1,
-                 stat = funs[[i]], integrated = T,
+                 stat = funs[[i]], integrated = T, only_det = F,
                  title = titles[i])
 }
 
@@ -571,7 +571,7 @@ ppc_fallow <- list()
 for(i in 1:length(funs)) {
 ppc_fallow[[i]] <- posterior_checks_multispecies(model = model_fits[[top]], 
                  model_data = multispecies_data, species_index = 2,
-                 stat = funs[[i]], integrated = T,
+                 stat = funs[[i]], integrated = T, only_det = F,
                  title = titles[i])
 }
 
@@ -622,7 +622,7 @@ We observed no divergences or any STAN sampling warnings/issues for our models. 
 + `beta_psi`: Parameters for the fixed effect abundance model  
 + `bioregion_sd`: Parameter for the bioregion random effect standard deviation  
 + `odRN`: Parameter for the over-dispersion in the Royle-Nichols negative binomial model  
-+ `od_sd` and `od_sd`: Parameters for the mean and standard deviation of over-dispersion link with bioregion for the camera counts.   
++ `od_mu`: Parameters for the mean over-dispersion for each species for the camera counts (combined with odRN).   
 
 ```{r convergence, fig.width = 10, fig.height = 20, fig.cap="Chain mixing of several key parameters relating to detection, abundance and dispersion"}
 bayesplot::color_scheme_set(unname(delwp_cols[1:6]))
@@ -631,8 +631,7 @@ convergence_params <- model_fits[[top]]$draws(c("beta_det",
                                                 "bioregion_sd", 
                                                 "beta_trans_det", 
                                                 "odRN", 
-                                                "od_mu", 
-                                                "od_sd"))
+                                                "od_mu"))
 
 mcmc_trace(convergence_params, facet_args = list(ncol = 4)) + 
   theme(panel.spacing = unit(0.5, "lines"))
@@ -644,11 +643,11 @@ Within the STAN model we generate predictions for sampled and un-sampled locatio
 
 ## Site-based Predictions
 
-### Site-based Prediction Map
+### Site-based Detections Map  
 
-Below we plot visualisations of point-estimates for the various deer species surveyed for in this study.
+Below we display a detection/non-detection map for all sites. 
 
-```{r SiteMap, fig.height = 18, fig.width = 8, fig.cap = "Site-level density estimates for all sites sampled as part of statewide and hog deer surveys. Point-density estimates are from trimmed means of the posterior draws (trimming of the top and bottom 1% of draws)"}
+```{r SiteDetections, fig.height = 16, fig.width=24, fig.cap="Detections of deer (camera or transects) from across Victoria. Detections of Hog Deer are restricted to Gippsland."}
 vic_regions <- vicmap_query("open-data-platform:delwp_region") %>%
   collect() %>%
   st_transform(3111) %>%
@@ -658,7 +657,52 @@ delwp_pal <- colorRampPalette(c("#B9C600",
                                 delwp_cols[["Teal"]], 
                                 delwp_cols[["Navy"]]))
 
+site_detection_plot <- function(data, regions, cams_curated, species_index) {
+  
+  cam_data <- cams_curated %>% dplyr::select(SiteID)
+  
+  cam_data$Detected <- factor(data$any_seen[species_index, ])
+  cam_data$cam_seen <- factor(as.integer(as.logical(rowSums(data$n_obs[,,species_index]))))
+  
+  if(species_index == 4) {
+    regions <- regions %>% filter(delwp_region == "GIPPSLAND")
+    cam_data <- cam_data %>% st_filter(regions %>% st_transform(4283))
+  }
+  
+   lvls <- length(unique(cam_data$Detected, na.rm = T))
+  
+plot <- ggplot2::ggplot(data = cam_data) +
+  ggplot2::geom_sf(data = regions, alpha = 0.75, fill = "grey80") +
+  ggplot2::geom_sf(aes(fill = Detected), shape = 21, size = 2, alpha = 0.75) +
+  ggplot2::scale_fill_manual(values = delwp_pal(lvls), 
+                             na.value = "transparent", na.translate = F,
+                             name = "Detected", guide = guide_legend(override.aes = list(size = 6))) +
+  # ggtitle(species_names[species_index])+
+  theme_bw() +
+  theme(legend.text = element_text(size = 18), legend.key.size = unit(1, "cm"),
+        title = element_text(size = 20))
+  
+return(plot)
+  
+}
 
+detection_plot <- cowplot::plot_grid(site_detection_plot(multispecies_data, regions = vic_regions, cams_curated = cams_curated, species_index = 1),
+site_detection_plot(multispecies_data, regions = vic_regions, cams_curated = cams_curated, species_index = 2),
+site_detection_plot(multispecies_data, regions = vic_regions, cams_curated = cams_curated, species_index = 3),
+site_detection_plot(multispecies_data, regions = vic_regions, cams_curated = cams_curated, species_index = 4), ncol = 2, 
+labels = c("A) Sambar Deer", "B) Fallow Deer", "C) Red Deer", "D) Hog Deer"), greedy = TRUE)
+
+ggsave(plot = detection_plot, filename = "outputs/plots/all_detection_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
+
+detection_plot
+```
+
+
+### Site-based Prediction Map
+
+Below we plot visualisations of point-estimates for the various deer species surveyed for in this study.
+
+```{r SiteMap, fig.height = 18, fig.width = 8, fig.cap = "Site-level density estimates for all sites sampled as part of statewide and hog deer surveys. Point-density estimates are from trimmed means of the posterior draws (trimming of the top and bottom 1% of draws)"}
 site_preds <- function(model, cams_curated, species_index) {
   
 rn_dens <- model$summary("N_site", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), CV = ~sd(.)/mean(.), posterior::default_summary_measures(), posterior::default_convergence_measures())
@@ -736,17 +780,27 @@ density_summary_table <- function(preds, model_data, species, species_index) {
   
   cam_seen <- as.integer(as.logical(rowSums(model_data$n_obs[,,species_index])))
   
+  transect_seen <- model_data$transects %>%
+    filter(Species == !!deer_species_all[species_index]) %>%
+    mutate(NoCam = case_when(Survey == "Camera" ~ 0L, 
+                             TRUE ~ 1)) %>%
+    group_by(SiteID) %>%
+    summarise(TransectDet = max(NoCam*Presence)) %>%
+    pull(TransectDet)
+  
   preds_sum <- preds %>% 
     st_drop_geometry() %>%
     mutate(`Species` = species,
            `CameraDetection` = cam_seen, 
            `AnyDetection` = model_data$any_seen[species_index, ], 
+           `OnlyTransect`  = transect_seen,
            `Detection` = case_when(CameraDetection == 0 & AnyDetection == 0 ~ "Not seen", 
                                    CameraDetection == 0 & AnyDetection == 1 ~ "Only detected on transects", 
-                                   CameraDetection == 1 & AnyDetection == 1 ~ "Seen on cameras")) %>%
+                                   CameraDetection == 1 & OnlyTransect == 0 ~ "Only seen on cameras", 
+                                   CameraDetection == 1 & OnlyTransect == 1 ~ "Seen on both camera and transect")) %>%
     group_by(`Species`, `Detection`) %>%
     summarise(`Number of Sites` = n(),
-              `Average Density` = mean(trimmed_mean)) %>%
+              `Average Density` = mean(mean)) %>%
     ungroup()
   
   return(preds_sum)
@@ -763,14 +817,14 @@ density_summary <- bind_rows(
                         species = "Hog", species_index = 4))
 
 density_summary %>%
-  kbl(format = "html", digits = 2, caption = "Average (98% trimmed mean) density estimates at the various sites groups of sites") %>%
+  kbl(format = "html", digits = 2, caption = "Average (mean) density estimates at the various sites groups of sites") %>%
   kable_styling("striped") %>%
   collapse_rows(1)
 ```
 
 ## Regional and Statewide Abundance
 
-Within our model we calculate abundance/density for deer in each of the `r multispecies_data$npc` km^2^ of public land. Based on these spatial predictions we can estimate abundance at a regional level (6 DEECA regions) and across the whole state.
+Within our model we calculate abundance/density for deer in each of the `r round(sum(multispecies_data$prop_pred))` km^2^ of public land. Based on these spatial predictions we can estimate abundance at a regional level (6 DEECA regions) and across the whole state.
 
 ### Statewide Maps
 
@@ -803,8 +857,7 @@ gp_preds_draws_sp <- gp_preds_draws_all[,which_sp]
 terra::values(pred_raster)[!is.na(terra::values(pred_raster))] <- apply(gp_preds_draws_sp, 
                                                                         2, 
                                                                         mean, 
-                                                                        na.rm = T, 
-                                                                        trim = 0.001) #filter out highest draw
+                                                                        na.rm = T) #filter out highest draw
 
 mean_raster[[i]] <- pred_raster
 mean_raster_discrete[[i]] <- mean_raster[[i]]
@@ -910,14 +963,16 @@ For each DEECA region we provide species-level estimates of abundance with 90 % 
 
 
 ```{r RegAbundance}
-Nhat_sum <- model_fits[[top]]$summary("Nhat")
+Nhat_sum <- model_fits[[top]]$summary("Nhat", trimmed_mean = ~mean(., trim = 0.025), CV = ~sd(.)/mean(.), posterior::default_summary_measures(), posterior::default_convergence_measures())
+
+Nhat_all <- model_fits[[top]]$summary("Nhat_sum", trimmed_mean = ~mean(., trim = 0.025), CV = ~sd(.)/mean(.), posterior::default_summary_measures(), posterior::default_convergence_measures())
 
 format_nhat <- function(sp, data = Nhat_sum) {
   fd <- data %>%
     filter(variable == !!paste0("Nhat[", sp, "]"))
   
   paste0("$\\hat N$ = ",
-         formatC(fd$mean, digits = 0, big.mark = ",", format = "f"), 
+         formatC(fd$trimmed_mean, digits = 0, big.mark = ",", format = "f"), 
         " [90% CI: ", 
         formatC(fd$q5, digits = 0, big.mark = ",", format = "f"), 
         " – ",
@@ -943,16 +998,20 @@ abundance_table <- function(model, regions, pred_area, caption, species_index, r
     dplyr::bind_rows(model$summary("Nhat", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures(), posterior::default_convergence_measures())[species_index,]) %>% 
     dplyr::mutate(variable = c(regions$delwp_region, "TOTAL"), 
                   `Area km2` = round(c(pred_area, sum(pred_area))), 
-                  `Average Density (per km2)` = round(median/`Area km2`, 2)) %>% 
+                  `Density (mean)` = round(trimmed_mean/`Area km2`, 2), 
+                  `Density (5 %)` = round(q5/`Area km2`, 2),
+                  `Density (95 %)` = round(q95/`Area km2`, 2)) %>% 
     dplyr::transmute(Region = variable, 
-                  `Mean` = round(mean), 
+                  `Trimmed Mean` = round(trimmed_mean), 
                   Median = round(median), 
                   SD = round(sd), 
                   MAD = round(mad),
                   `5 %` = round(q5), 
                   `95 %` = round(q95), 
                   `Area km2`,
-                  `Average Density (per km2)`)
+                  `Density (mean)`,
+                  `Density (5 %)`,
+                  `Density (95 %)`)
   
   if(return_data) {
     
@@ -992,7 +1051,7 @@ abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, ca
 abundance_table(model_fits[[top]], regions = reg, pred_area = pred_a_df$area, caption = "Regional estimates of Hog Deer Density", species_index = 4) 
 ```
 
-The total estimated number of Sambar deer in Victoria was estimated at `r format_nhat(1)`, followed by Fallow deer at `r format_nhat(2)`, Red deer (`r format_nhat(3)`), and Hog Deer (`r format_nhat(4)`). 
+Deer were found to be widely distributed across Victoria. Across approximately `r round(sum(multispecies_data$prop_pred))` km2 of public land we estimate total deer abundance of the four species investigated in this study (Sambar, Fallow, Red and Hog) at `r formatC(Nhat_all$trimmed_mean, digits = 0, big.mark = ",", format = "f")` (90 % CI: `r formatC(Nhat_all$q5, digits = 0, big.mark = ",", format = "f")` - `r formatC(Nhat_all$q95, digits = 0, big.mark = ",", format = "f")`.  Sambar deer were the most populous species across Victoria (`r format_nhat(1)`), followed by Fallow at `r format_nhat(2)`, Red (`r format_nhat(3)`), and Hog (`r format_nhat(4)`). 
 
 # Model Covariates
 
@@ -1127,6 +1186,8 @@ detection_plot_HN <- ggplot(aes(x = Distance), data = det_curve_sum) +
   labs(fill = "Herbaceous\nUnderstorey\nCover", colour = "Herbaceous\nUnderstorey\nCover") +
   theme_classic()
 
+ggsave(plot = detection_plot_HN, filename = "outputs/plots/hazard_detection_plot.png", width = 2400, height = 1600, units = "px")
+
 detection_plot_HN
 ```
 
@@ -1215,7 +1276,7 @@ data_d5 <- data_for_plot %>%
 
 data_combined <- bind_rows(data_for_plot, data_d3, data_d5)
 
-marginal_effects_plot_cmd_all(data_combined, 
+transect_det_plot <- marginal_effects_plot_cmd_all(data_combined, 
                               factor = TRUE,
                               ylab = "Detection probability") +
   xlab("Survey method") +
@@ -1225,6 +1286,10 @@ marginal_effects_plot_cmd_all(data_combined,
   # scale_x_discrete(expand = c(0, 0)) +
   theme_classic() +
   theme(legend.text = ggtext::element_markdown())
+
+ggsave(plot = transect_det_plot, filename = "outputs/plots/transect_detection_plot.png", width = 2400, height = 1400, units = "px")
+
+transect_det_plot
 
 ```
 
@@ -1272,11 +1337,7 @@ Bioregion usually had a substantial impact on abundance estimates across the sta
 
 <!-- We can also visualise the average densities within each bioregion for the four species:   -->
 
-```{r bioregiondensity, eval = FALSE, echo = FALSE, include = FALSE}
-
-```
-
-```{r, fig.height = 16, fig.width=24, warning = FALSE, fig.cap="Effect of Victorian Bioregions on abundance of deer"}
+```{r bioregiondensity, fig.height = 16, fig.width=24, warning = FALSE, fig.cap="Effect of Victorian Bioregions on abundance of deer"}
 # Bioregion map 
 bioregion_eff <- model_fits[[top]]$summary("eps_bioregion", posterior::default_summary_measures())
 
@@ -1341,7 +1402,7 @@ bioregion_ggplot <- function(effect_df, title) {
     scale_fill_gradient2(low = "#B9C600",
                          mid = delwp_cols[["Teal"]], 
                          high = delwp_cols[["Navy"]], guide = guide_coloursteps(title = "Average Effect\n (log-scale)")) +
-    labs(title = title, x = "Longitude", y = "Latitude") +
+    labs(x = "Longitude", y = "Latitude") +
     ggspatial::annotation_scale() +
     delwp_theme()
 }
@@ -1351,7 +1412,7 @@ bioregion_ggplot <- function(effect_df, title) {
 cpb <- cowplot::plot_grid(bioregion_ggplot(bioregion_effects[[1]], "Sambar"),
 bioregion_ggplot(bioregion_effects[[2]], "Fallow"),
 bioregion_ggplot(bioregion_effects[[3]], "Red"),
-bioregion_ggplot(bioregion_effects[[4]], "Hog"), labels = "AUTO", ncol = 2)
+bioregion_ggplot(bioregion_effects[[4]], "Hog"), labels = c("A) Sambar Deer", "B) Fallow Deer", "C) Red Deer", "D) Hog Deer"), ncol = 2)
 
 ggsave(plot = cpb, filename = "outputs/plots/bioregion_effects_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
 
@@ -1359,20 +1420,21 @@ cpb
 ```
 
 ```{r, eval = FALSE, include = FALSE}
-site_grid <- st_read(dsn = con,
-                     layer = Id(schema = "deervic", table = "raw_sampling_grid"))
-site_grid_c <- st_read(dsn = con,
-                     layer = Id(schema = "deervic", table = "curated_final_site_selection"))
-
-site_grid_filter <- site_grid %>% filter(frac_area >= 0.05)
-# load("data/crown_layers_extent.rda")
-
-site_grid_crop <- site_grid_filter %>% 
-  st_intersection(crown_layers_extent)
-
-grid_vals <-  exactextractr::exact_extract(combined_raster, site_grid_crop, 'mean')
-
-site_grid_combined <- bind_cols(site_grid_crop, grid_vals)
+# site_grid <- st_read(dsn = con,
+#                      layer = Id(schema = "deervic", table = "raw_sampling_grid"))
+# site_grid_c <- st_read(dsn = con,
+#                      layer = Id(schema = "deervic", table = "curated_final_site_selection"))
+# 
+# site_grid_filter <- site_grid %>% filter(frac_area >= 0.05)
+# # load("data/crown_layers_extent.rda")
+# crown_land <- readRDS("data/crown_land.rds")
+# 
+# site_grid_crop <- site_grid_filter %>% 
+#   st_intersection(crown_layers_extent)
+# 
+# grid_vals <-  exactextractr::exact_extract(combined_raster, site_grid_crop, 'sum')
+# 
+# site_grid_combined <- bind_cols(site_grid_crop, grid_vals)
 
 
 vic_bound <- vicmap_query("open-data-platform:vmlite_victoria_polygon_su5") %>%
@@ -1390,9 +1452,22 @@ grid <- sf::st_make_grid(x = vic_bound,
                          cellsize = cellsize,
                          square = FALSE)
 
-site_grid_crop <- grid %>% 
-  st_transform(4283) %>%
-  st_intersection(crown_layers_extent)
+crown_land2 <- readRDS("data/crown_land.rds") %>%
+  st_simplify(dTolerance = 500)
+
+# site_grid_crop <- grid %>% 
+#   st_intersection(crown_land2)
+
+combined_raster <- rast("outputs/rasters/combined_deer_average_density.tif")
+
+grid_vals <-  exactextractr::exact_extract(combined_raster, grid, 'sum') %>% `names<-`(species_names)
+grid_area <- st_area(grid) %>% units::set_units("km2")
+
+site_grid_combined <-  st_as_sf(grid) %>% 
+  bind_cols(grid_vals) %>% 
+  st_filter(crown_land2)
+
+mapview::mapview(site_grid_combined, zcol = "Sambar Deer")
 ```
 
 
@@ -1401,6 +1476,18 @@ site_grid_crop <- grid %>%
 ```{r FixedEffects, fig.height=7, fig.width = 10, warning = FALSE, message = FALSE, fig.cap="Marginal response curves for the various fixed-effect parameters used in the model."}
 # beta_summaries 
 beta_summaries <- model_fits[[top]]$summary("beta_psi")
+
+beta_table_summary <- beta_summaries %>% 
+  mutate(species = factor(rep(species_names, times = 6),levels = species_names), 
+         covariate = rep(c("(Intercept)",
+              "Bare Soil (%)", 
+              "Nitrogen (%)", 
+              "Distance to Pastural Land (m)", 
+              "Precipitation Seasonality", 
+              'Forest Edge per km^2^ (m)'), each = 4)) %>%
+  arrange(species) %>%
+  select(species, covariate, mean, sd, q5, q95)
+
 format_cov <- function(sp, b, data = beta_summaries, variable = "beta_psi") {
   fd <- data %>%
     filter(variable == !!paste0(variable, "[", sp, ",",b+1,"]"))
@@ -1481,14 +1568,25 @@ cov_plot
 
 Of the five fixed-effect covariates used in the top model we found that all had tangible effects for one or more species. The direction and magnitude of these effects often varied between species. Bare soil had a slight positive effect on Sambar abundance (`r format_cov(1,1)`), negligible effect on Fallow (`r format_cov(2,1)`) and Red Deer (`r format_cov(3,1)`), and a slight negative effect on Hog Deer abundance (`r format_cov(4,1)`). Nitrogen generally had weaker, more variable effects. The effect of nitrogen was weakly positive for Sambar (`r format_cov(1,2)`), and Hog Deer (`r format_cov(4,2)`); but weakly negative for Fallow (`r format_cov(2,2)`), and Red Deer (`r format_cov(3,2)`). The effect of distance to pasture was consistently negative across all four species, which can also be interpreted as a prefence of deer to be 'closer' to pastural areas. However the effect of this covariate varied in magnitude for Sambar (`r format_cov(1,3)`), Fallow (`r format_cov(2,3)`), Red (`r format_cov(3,3)`), and Hog Deer (`r format_cov(4,3)`). Sambar Deer weakly favored areas with less seasonal variation in precipitation (`r format_cov(1,4)`), with Fallow (`r format_cov(2,4)`), Red (`r format_cov(3,4)`), and Hog Deer (`r format_cov(4,4)`) all showing positive relationships between precipitation seasonality and abundance. Lastly, we saw that the amount of forest edge in the landscape positively impacted abundance for Sambar (`r format_cov(1,5)`), and Fallow Deer (`r format_cov(2,5)`). This relationship was weakly negative for Red Deer (`r format_cov(3,5)`), and weakly positive for Hog Deer (`r format_cov(4,5)`).   
 
+```{r covtable}
+which_sig <- which(beta_table_summary$q5 * beta_table_summary$q95 > 0)
+
+write.csv(beta_table_summary, "outputs/tables/beta_coefs.csv")
+beta_table_summary %>%
+  kbl("html", digits = 3, caption = "beta-coeffiient estimates for the drivers of species abundance, coefficient estimates not-overalpping zero are shown in bold") %>%
+  kable_styling("striped") %>%
+  collapse_rows(1) %>%
+  row_spec(row = which_sig, bold = TRUE)
+```
+
+
 # Additional Parameters of Interest
 
 Below is a table with several model parameters we estimated:  
 
-```{r}
+```{r keyparams}
 key_params <- model_fits[[top]]$summary(c("av_gs", 
                                           "od_mu", 
-                                          "od_sd", 
                                           "odRN", 
                                           "activ", 
                                           "Nhat_sum"))
@@ -1498,6 +1596,29 @@ key_params %>%
   kable_styling("striped")
 ```
 
+### Dispersion  
+
+```{r Dispersion}
+dispersion_data <- model_fits[[top]]$summary(c("od", "odRN")) %>%
+  mutate(species = c(species_names, "All"), 
+         model = c(rep("Camera count", 4), "Royle-Nichols"), 
+         parameter = c("$$\\phi_1$$", "$$\\phi_2$$", "$$\\phi_3$$", "$$\\phi_4$$", "$$\\bar \\phi$$")) %>%
+  select(model, species, parameter, mean, sd, q5, q95)
+
+format_od <- function(data) {
+  paste0(dispersion_data$parameter, " = ", round(dispersion_data$mean, 3), " [90 % CI: ", round(dispersion_data$q5,3), " -- ", round(dispersion_data$q95,3), "]")
+}
+
+formatred_od <- format_od(dispersion_data)
+
+dispersion_data %>% 
+  kbl("html", digits = 3, caption = "Estimates of the dispersion parameter within negative binomial submodels") %>%
+  kable_styling("striped") %>%
+  collapse_rows(1)
+  
+```
+
+Estimates of abundance were also dependent upon overdispersion (excess variation) in the camera counts and transect detections. Sambar (`r formatred_od[1]`), Fallow (`r formatred_od[2]`), Red (`r formatred_od[3]`), and Hog Deer (`r formatred_od[4]`) all had large amounts of overdispersion (where lower values (<1) equate to more variance). The Royle-Nichols model had less variance (than camera counts) associated with transect-level detections/non-detections (`r formatred_od[5]`).  
 
 # Relating abundance to vegetation 
 
@@ -1588,7 +1709,7 @@ bform1 <- bf(mvbind(BGroundCover,
                     NNWHUCover, 
                     Seedlings,
                     Saplings,
-                    ExoticPresence) ~ scale(sqrt(AllDeerDensity))
+                    ExoticPresence) ~ AllDeerDensity
                                     + scale(BIO01)
                                     + scale(BIO04)
                                     + scale(BIO06)
@@ -1629,12 +1750,12 @@ Below we show a complete summary of the model, including all coefficients estima
 
 ```{r VegOutcomes, warning = FALSE, out.width='1200px', size='small'}
 vegfit <- readRDS("outputs/models/vegfit.rds")
-veg_coefs <- fixef(vegfit, probs = c(0.05, 0.95), pars = c("BGroundCover_scalesqrtAllDeerDensity", 
-                                                             "NWUCover_scalesqrtAllDeerDensity", 
-                                                             "NNWHUCover_scalesqrtAllDeerDensity", 
-                                                             "Seedlings_scalesqrtAllDeerDensity", 
-                                                             "Saplings_scalesqrtAllDeerDensity", 
-                                                             "ExoticPresence_scalesqrtAllDeerDensity")) %>%
+veg_coefs <- fixef(vegfit, probs = c(0.05, 0.95), pars = c("BGroundCover_AllDeerDensity", 
+                                                             "NWUCover_AllDeerDensity", 
+                                                             "NNWHUCover_AllDeerDensity", 
+                                                             "Seedlings_AllDeerDensity", 
+                                                             "Saplings_AllDeerDensity", 
+                                                             "ExoticPresence_AllDeerDensity")) %>%
   as.data.frame() %>%
   mutate(Effect = paste0(c("Bare Ground Cover",
                            "Native Woody Understorey Cover",
@@ -1674,7 +1795,7 @@ plot_deer_relationship <- function(plot_data, plot_data_50, yaxis) {
     geom_ribbon(aes(x = AllDeerDensity, ymin = `lower__`, ymax = `upper__`), 
                 fill = delwp_cols[["Navy"]], alpha = 0.3, data = plot_data_50) +
     geom_smooth(aes(x = AllDeerDensity, y = `estimate__`), 
-                colour = delwp_cols[["Navy"]], method = "loess", formula = y~x, size = 2) +
+                colour = delwp_cols[["Navy"]], method = "loess", formula = y~x, linewidth = 2) +
     ylab(paste(yaxis)) +
     xlab("Deer Density (per km^2^)") +
     delwp_theme() +
@@ -1696,8 +1817,23 @@ vegplot
 
 ```
 
-We found deer density to have several plausible relationships with several structural vegetation componentsw, including negative relationships with bare ground cover (`r print_conditional(veg_coefs, 1)`), native woody understorey cover (`r print_conditional(veg_coefs, 2)`), and a positive relationship with native non-woody/herbacous understorey cover (`r print_conditional(veg_coefs, 3)`). We also found strong evidence suggesting the presence of weeds is more likely at sites with higher densities of deer (`r print_conditional(veg_coefs, i = 6, OR = F)`, `r print_conditional(veg_coefs, i = 6, OR = T)`). We did not find tangible relationships between deer abundance and seedling or sapling counts.   
+We found deer density to have several plausible relationships with several structural vegetation componentsw, including negative relationships with bare ground cover (`r print_conditional(veg_coefs, 1)`), native woody understorey cover (`r print_conditional(veg_coefs, 2)`), and a positive relationship with native non-woody/herbaceous understorey cover (`r print_conditional(veg_coefs, 3)`). We also found strong evidence suggesting the presence of weeds is more likely at sites with higher densities of deer (`r print_conditional(veg_coefs, i = 6, OR = F)`, `r print_conditional(veg_coefs, i = 6, OR = T)`). We did not find tangible relationships between deer abundance and seedling or sapling counts.   
 
 # Analysis Summary
 
-Our studies detected deer at `r sum(rowSums(multispecies_data$n_obs)>0)`/`r multispecies_data$n_site` cameras across Victoria and some form of deer sign (camera or transect) at `r sum(colSums(multispecies_data$any_seen)>0)`/`r multispecies_data$n_site` sites. Our average estimates of deer density at the `r multispecies_data$n_site` sites ranged from 0 to `r round(max(bind_rows(site_deer_predictions)$mean),1)` deer per km^2^. Across approximately 74,570 km2 of public land in Victoria we estimate total deer abundance of the four species investigated in this study (Sambar, Fallow, Red and Hog) at `r formatC(model_fits[[top]]$summary("Nhat_sum")$mean, digits = 0, big.mark = ",", format = "f")` (90 % CI: `r formatC(model_fits[[top]]$summary("Nhat_sum")$q5, digits = 0, big.mark = ",", format = "f")` - `r formatC(model_fits[[top]]$summary("Nhat_sum")$q95, digits = 0, big.mark = ",", format = "f")`. We also find plausible links between deer abundance and increased presence of exotic weed species. 
+Our studies detected deer at `r sum(rowSums(multispecies_data$n_obs)>0)`/`r multispecies_data$n_site` cameras across Victoria and some form of deer sign (camera or transect) at `r sum(colSums(multispecies_data$any_seen)>0)`/`r multispecies_data$n_site` sites. Our average estimates of deer density at the `r multispecies_data$n_site` sites ranged from 0 to `r round(max(bind_rows(site_deer_predictions)$mean),1)` deer per km^2^. Across approximately 74,570 km2 of public land in Victoria we estimate total deer abundance of the four species investigated in this study (Sambar, Fallow, Red and Hog) at `r formatC(Nhat_all$trimmed_mean, digits = 0, big.mark = ",", format = "f")` (90 % CI: `r formatC(Nhat_all$q5, digits = 0, big.mark = ",", format = "f")` - `r formatC(Nhat_all$q95, digits = 0, big.mark = ",", format = "f")`. We also find plausible links between deer abundance and increased presence of exotic weed species. 
+
+# Comparisons to other studies  
+
+```{r}
+asot_areas <- st_read("data/asot_operational_areas")
+asot_abundance <- exactextractr::exact_extract(combined_raster[[1:2]], y = asot_areas, "sum") %>%
+  `names<-`(c("Sambar_N", "Fallow_N"))
+
+asot_density <- asot_abundance %>% 
+  mutate(Name = asot_areas$area_name, 
+         area = st_area(asot_areas) %>% units::set_units("km2"), 
+         Sambar_D = Sambar_N/area, 
+         Fallow_D = Fallow_N/area)
+```
+
