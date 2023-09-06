@@ -1183,7 +1183,9 @@ We obtained a threshold distribution based on the mean abundance values for each
 
 ### Comparison of range size to existing distributions 
 
-```{r}
+Using range size maps based on presence-only records and VBA elicitation we can generate estimated existing distributions for the deer species on public land:
+
+```{r distributions}
 existing_dist <- list()
 existing_dist[["Sambar"]] <- st_read("data/existing_distributions/Sambar_Deer_Distributions_Final_20201203")
 existing_dist[["Fallow"]] <- st_read("data/existing_distributions/Fallow_Deer_Distributions_Final_20201203")
@@ -1203,8 +1205,10 @@ existing_ranges <- sapply(existing_dist_cl, st_area) %>%
   units::set_units("m2") %>% 
   units::set_units("km2") %>%
   formatC(., digits = 0, format = "fg", big.mark = ",") %>% 
-  unname() %>% 
   as.character()
+
+names(existing_ranges) <- species_names
+existing_ranges
 ```
 
 
