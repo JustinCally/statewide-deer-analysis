@@ -1,7 +1,7 @@
 ---
 title: "Abundance of Deer in Victoria"
 description: |
-  Determining abundance of deer species in Victoria using camera trap data
+  Determining abundance of deer species in Victoria using camera trap and deer sign data. Supplementary code and methods to the ARI Technical Report "Abundance of Deer in Victoria"
 author:
   - name: Justin G Cally
     url: https://justincally.github.io/blog/
@@ -19,7 +19,20 @@ output:
     theme: yeti
 slug: statewidedeer
 bibliography: bibliography.bib
+knit: |
+  (function(input, ...) {
+    rmarkdown::render(
+      input,
+      output_file = 'index.html',
+      envir = globalenv()
+    )
+  })
 ---
+---
+
+# About this document  
+
+This following document has been written in RMarkdown and contains embedded analyses using `R` and `STAN` programming languages. Using this `RMarkdown` enables us to keep all the analyses used for the report in a single repository and file. This RMarkdown has been rendered to HTML and is available at XXXX. Analyses in this document are carried out sequentially, meaning that some objects, functions or variables needed in later code chunks were made earlier. This repository and RMarkdown also uses a database connection to a secure DEECA database and thus cannot be reproduced without database access. However the main data used in our abundance model has been packeged up as `data/multispecies_data.rds` and is available in the github repository for users wanting to re-run our model.    
 
 # Methods used to estimate deer density
 
@@ -27,7 +40,15 @@ bibliography: bibliography.bib
 
 The density of deer at a given site can be estimated using camera-trap distance sampling (CTDS). CTDS is a modified form of distance-sampling that allows us to infer the probability a given individual will be detected within the survey area (area in front of the camera). This detection probability is a function of the distance of the individual from the camera, whereby individuals entering the camera field of view further from the camera have a lower detection probability up to a given truncation distance from the camera where detection probability is near-zero.
 
-An underlying assumption about CTDS is that the probability a deer will be available for detection at any given point location within the camera field of view is equal. Under this assumption, for a point transect, we take into account the total area for each distance-bin area, which increases at further distance bins. However, in this study we implement a novel method that considers group size of the detected species in the availability calculations. For larger groups, CTDS should account for the availability of the closest individual rather than the availability of all individuals. When group size increases it is more likely the the closest individual from the group is closer to the camera. If we assume that the triggering of the camera is dependent upon the closest individual than we must adjust our estimated availability to account for variable group sizes. If we do not adjust for group size and only use the distance to the closest individual for our DS models then we will likely underestimate the detection rate as distances will be smaller than reality. Alternatively, if we record distances to multiple individuals in the same photo and take an average or model them independently we would likely overestimate detection probability because individuals at further distances are recorded because a closer individual has triggered the camera trap. For more information on how group size is likely to effect CTDS abundance estimates a simulation study has been written here: <https://justincally.github.io/blog/posts/2022-11-10-ctds-for-groups/>
+An underlying assumption about CTDS is that the probability a deer will be available for detection at any given point location within the camera field of view is equal. Under this assumption, for a point transect, we take into account the total area for each distance-bin area, which increases at further distance bins. However, in this study we implement a novel method that considers group size of the detected species in the availability calculations. For larger groups, CTDS should account for the availability of the closest individual rather than the availability of all individuals. When group size increases it is more likely the the closest individual from the group is closer to the camera. If we assume that the triggering of the camera is dependent upon the closest individual than we must adjust our estimated availability to account for variable group sizes. If we do not adjust for group size and only use the distance to the closest individual for our DS models then we will likely underestimate the detection rate as distances will be smaller than reality. Alternatively, if we record distances to multiple individuals in the same photo and take an average or model them independently we would likely overestimate detection probability because individuals at further distances are recorded because a closer individual has triggered the camera trap. For more information on how group size is likely to effect CTDS abundance estimates a simulation study has been written here: <https://justincally.github.io/blog/posts/2022-11-10-ctds-for-groups/>  
+
+## Supplementing the camera trap data with transect-level data
+
+Our surveys involved the deployment of cameras at a site for usually 6-8 weeks as well as 150m transect searches that were walked up and back by a single individual for two transects, and one transect which was walked once by two observers. This gives us an approximate survey area at each site of 150m x 2 x 3 = 900m. Deer sign was recorded on these transects with pellets, footprints, rubbings, and wallows recorded as either present or absent.
+
+This data provides supplemental presence-absence data that can be integrated into our model to help inform likely densities at sites where cameras did not record observations but one or more deer signs were detected along the transects.
+
+The foundation for this integration is a Royle-Nichols model (Royle and Nichols 2003) that models the frequency of detection as a mixture of detection probability and abundance. Given that we also collect absolute abundance estimates via the camera trap data, relative abundance measures from this output can be transformed to absolute abundance and thus provide an avenue to integrate camera and transect-based data into a single model estimating abundance. 
 
 # Setup
 
@@ -62,7 +83,7 @@ con <- weda::weda_connect(password = keyring::key_get(service = "ari-dev-weda-ps
 
 # Custom Functions
 
-Additional functions used in the data preparation, modelling and analysis are available in the `/functions` directory.
+Additional functions used in the data preparation, modelling and analysis are available in the `/functions` directory. These include functions relating to plotting, organizing model draws and calculating activity and availability of deer for use within the model.  
 
 ```{r sourcefunctions, results = 'hide', echo =FALSE, message=FALSE}
 # Source internal functions
@@ -71,25 +92,24 @@ sapply(list.files("functions", full.names = T), source, verbose = F)
 
 # Prepare Data
 
-Wrangle and format data for the STAN models for the various species.
+In this section we wrangle and format data for the `STAN` model. The structure of the data entering the STAN model is specified in the `data` block of the `STAN` model. 
 
 ## Scope of models
 
-Outline which species should be modeled, and which projects to source data from.
+Outline which species should be modeled, and which projects (state-wide and hog deer) to source data from.
 
 ```{r data_params}
 # Species to run model for.
 deer_species_all <- c("Cervus unicolor", "Dama dama", "Cervus elaphus", "Axis porcinus")
 species_names <- c("Sambar Deer", "Fallow Deer", "Red Deer", "Hog Deer")
-# Projects to select.
+# Projects to select. used in querying database
 project_short_name <- c("hog_deer_2023", "StatewideDeer")
 # Buffer for data extraction.
 spatial_buffer <- 1000
 # Covariate Rasters
 raster_files <- "/Volumes/DeerVic\ Photos/Processed_Rasters"
-# raster_files <- "data/prediction_raster"
 prediction_raster <- "data/prediction_raster/statewide_raster.tif"
-# For the integrated model we place limits on the maximum density of deer to integrate over. In cases where there are no detections on the camera this is limited to 15 per km2. In cases where deer were detected on the camera this is expanded to 50. We believe this is sufficiently high. Very high values of these will be less efficient. 
+# For the integrated model we place limits on the maximum density of deer to integrate over. In cases where there are no detections on the camera this is limited to 15 per km2. In cases where deer were detected on the camera this is expanded to 30. We believe this is sufficiently high. Very high values of these will be less efficient. 
 n_max_no_det <- 15
 n_max_det <- 30
 ```
@@ -110,12 +130,12 @@ n_site <- nrow(cams_curated)
 
 ## Formulas for detection and abundance
 
-Here we outline formulas to be used in the models. The formulas account for the various fixed-effect parameters.
+Here we outline formulas to be used in the models that we compare. The formulas account for the various fixed-effect parameters, random-effects are hard-coded within the STAN model.
 
 ```{r formulas}
 #### Model formulas ####
-
 #### Transect Formula: Survey Only ####
+# Formula used in the RN model  
 transect_formula <- ~Survey
 
 #### Abundance Formula Options #### 
@@ -189,17 +209,19 @@ nc <- 8 # number of chains
 
 ## Read in Models
 
-These are the models used in the analysis. The first is an integrated model that requires transect and camera data. The second is a count-only model that just requires the camera data.
+These are the models used in the analysis. The first is a model using bioregion as a random effect for the abundance process. 
 
 ```{cmdstan, file = "stan/count_det_nondet_negbin_ms.stan", output.var = "model_negbin_ms", eval = FALSE}
 
 ```
 
+The second model uses the combination of bioregion and EVC as random-effects on the abundance process.
+
 ```{cmdstan, file = "stan/count_det_nondet_negbin_ms_evc.stan", output.var = "model_negbin_ms_evc", eval = FALSE}
 
 ```
 
-```{r models, echo = FALSE, warning=FALSE}
+```{r models, echo = FALSE, warning=FALSE, include=FALSE}
 model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"))
 model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
 ```
@@ -208,7 +230,7 @@ model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin
 
 ### Detection Models
 
-Using the distance package we compare several detection functions (hazard and half-normal) with the inclusion of a parameter (herbaceous understorey cover), which may impact detection rates. The top model (as chosen by AIC) from this selection will be included in our full STAN model.
+Using the `Distance` R package [@Distance] we compare several detection functions (hazard and half-normal) with the inclusion of a parameter (herbaceous understorey cover), which may impact detection rates. The top model (as chosen by AIC) from this selection will be included in our full `STAN` model. Note that we use this approach only on photos where group size = 1. However, the model then used with the `STAN` model uses data from all group sizes. This following section is just to help us select the best detection submodel to include within our integrated `STAN` model. Previous attempts to use Leave-One-Out Cross Validation (LOO-CV) [@loo_2020] for a suite of Bayesian detection models were not informative, thus we use this more conventional approach.  
 
 ```{r DetExplore}
 filter_behaviour <- TRUE
@@ -299,6 +321,8 @@ snapshot_interval <- 2
   mybreaks <- c(0,2.5,5,7.5,10,12.5)
   trunc.list <- list(left=0, right=12.5)
   conversion <- convert_units("metre", "metre", "metre")
+  
+  # Different models to test
   
   hn0 <- ds(ds_data, transect = "point", key="hn", adjustment = NULL,
           convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
