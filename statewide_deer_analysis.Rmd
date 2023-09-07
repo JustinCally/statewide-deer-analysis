@@ -7,7 +7,7 @@ author:
     url: https://justincally.github.io/blog/
     affiliation: Arthur Rylah Institute
     affiliation_url: https://www.ari.vic.gov.au/
-date: 2023-07-06
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   distill::distill_article:
     self_contained: true
@@ -2063,5 +2063,25 @@ asot_density <- asot_abundance %>%
          area = st_area(asot_areas) %>% units::set_units("km2"), 
          Sambar_D = Sambar_N/area, 
          Fallow_D = Fallow_N/area)
+```
+
+# Presence-absence records 
+
+The camera traps used in this study also detected numerous other species. We can obtain a table of the presence-absences of these species using the following code:  
+
+```{r OtherSp}
+# Get view 
+pa <- tbl(con, dbplyr::in_schema("camtrap", "processed_site_substation_presence_absence")) %>%
+  dplyr::filter(ProjectShortName %in% !!project_short_name) %>% # Only retrieve cam records for hog deer 2023
+  dplyr::collect() %>%
+  dplyr::arrange(SiteID) 
+
+# Get pa table
+pa_table <- pa %>%
+  group_by(Species = common_name) %>%
+  summarise(`Sites Detected` = sum(Presence)) %>%
+  arrange(desc(`Sites Detected`))
+
+write.csv(pa_table, "outputs/tables/other_species.csv", row.names = F)
 ```
 
