@@ -29,53 +29,6 @@ The density of deer at a given site can be estimated using camera-trap distance 
 
 An underlying assumption about CTDS is that the probability a deer will be available for detection at any given point location within the camera field of view is equal. Under this assumption, for a point transect, we take into account the total area for each distance-bin area, which increases at further distance bins. However, in this study we implement a novel method that considers group size of the detected species in the availability calculations. For larger groups, CTDS should account for the availability of the closest individual rather than the availability of all individuals. When group size increases it is more likely the the closest individual from the group is closer to the camera. If we assume that the triggering of the camera is dependent upon the closest individual than we must adjust our estimated availability to account for variable group sizes. If we do not adjust for group size and only use the distance to the closest individual for our DS models then we will likely underestimate the detection rate as distances will be smaller than reality. Alternatively, if we record distances to multiple individuals in the same photo and take an average or model them independently we would likely overestimate detection probability because individuals at further distances are recorded because a closer individual has triggered the camera trap. For more information on how group size is likely to effect CTDS abundance estimates a simulation study has been written here: <https://justincally.github.io/blog/posts/2022-11-10-ctds-for-groups/>
 
-In this study we investigate two possible detection functions that may explain how detection rates 'fall off' over the distances from the camera. Firstly a half-normal detection function given by:
-
-$$p = exp(-y^2/2\sigma^2) $$ Hereby $p$ is the probability of detection, $y$ is the distance from the camera (midpoint of the detection bin), and $\sigma$ is the shape parameter. Alternatively, we compare the fit of this detection function to a hazard-rate function, where detection probability is given by:
-
-$$p = 1 - exp(-(y/\sigma)^{-\theta})$$ In these hazard-rate models, an additional parameter ($\theta$) is estimated, which is *scale* parameter. Given that detection rate may not necessarily be uniform across sites we model the magnitude of the *shape* parameter across sites (i) as:
-
-$$log(\sigma_i) = \alpha + \beta_{det} \times HU_i$$ Where $HU_i$ is the amount of herbaceous understorey measured surrounding the camera. $\beta_{det}$ is the coefficient for the effect of herbaceous understorey on detection and $\alpha$ is the intercept.
-
-Using these estimates of detection probability in different bins we can then estimate the average detection probability of an individual at a given camera station. This can then be used to account for imperfect detection when fitting observed counts from the camera trap to parameters estimating the true abundance at a site.
-
-## Modelling density
-
-### Modelling abundnace using camera trap data
-
-The density at a site is modelled as a function of the observed counts, relative frequency of group sizes, distance-sampling detection probability, survey effort (area in front of camera x time/snapshot moments the camera is deployed for), proportion of time within a 24-hour cycle that deer were active ($activity$). This parameter was estimated using the `activity` R package and included in the model using an informative beta-distribution prior. For a given species the number of detection's of groups (1 or more deer) during the deployment is estimated with:
-
-$$C_{n,j} = NegBinomial2(exp(log(\lambda_{n}) + log(p_{n,j}) + log(activity) + log(\epsilon gs_{n,j}) + log(\bar p)), \phi_n) \times survey\ area_n$$\
-Where $C_{n,j}$ is the observed count of group size ($j$) at a site ($n$). $\lambda_{n}$ is the true density at a site. In this model $X_n$ are the values of the fixed-effect covariates, $\beta$ are the fixed effect coefficients and $\epsilon bioregion_n$ is the bioregion random effect drawn from a standard normal distribution:
-
-$$\lambda_{n} = X_n \times \beta + \epsilon bioregion_n$$
-
-The $\epsilon gs_{n,j}$ is the proportional variation in group size ar a site, where $\sum \epsilon gs_{n,j \in [1,max(group\ size)]} = 1$. Assuming that the rate of group sizes can vary between sites, we model the variation in group size between sites with a group-size level intercept ($\zeta_j$) and site-group-size level random effect ($\epsilon site_{n,j}$):
-
-$$\epsilon psi_{nj} = exp(\zeta_j + \epsilon site_{n,j}) $$ The proportional group size at a given site and for a given group size is thus given by:
-
-$$\epsilon gs_{nj} = \frac{\epsilon psi_{nj}}{sum(\epsilon psi_{n})}$$
-
-We opt for a negative binomial model to account for over-dispersion in counts/abundance. The parameterization of the negative binomial model implemented here ([`NegBinomial2`](https://mc-stan.org/docs/functions-reference/nbalt.html)) contains a mean as expressed by the log-sum of the first five terms. It also contains a dispersion parameter ($\phi_n$), which is the over-dispersion at the site. $\phi_n$ is modelled as a function of bioregion:
-
-$$\phi_n = exp(\chi mu_{bioregion_n} + \chi sd_{bioregion_n} \times \chi raw_{bioregion_n})$$
-
-### Supplementing the camera trap data with transect-level data
-
-Our surveys involved the deployment of cameras at a site for usually 6-8 weeks as well as 150m transect searches that were walked up and back by a single individual for two transects, and one transect which was walked once by two observers. This gives us an approximate survey area at each site of 150m x 2 x 3 = 900m. Deer sign was recorded on these transects with pellets, footprints, rubbings, and wallows recorded as either present or absent.
-
-This data provides supplemental presence-absence data that can be integrated into our model to help inform likely densities at sites where cameras did not record observations but one or more deer signs were detected along the transects.
-
-The foundation for this integration is a Royle-Nichols model [@Royle2003] that models the frequency of detection as a mixture of detection probability and abundance. Given that we also collect absolute abundance estimates via the camera trap data, relative abundance measures from this output can be transformed to absolute abundance and thus provide an avenue to integrate camera and transect-based data into a single model estimating abundance. The model can be expressed as:
-
-$$N_n \sim NegBinomial2(\lambda_n, \bar\phi)$$ Where $\bar\phi$ is the over-dispersion term of the Royle-Nichols component of the model. Conditional detection probability is expressed based on the probability of detection from a given visit/survey type ($j$) (e.g. camera, pellet transect, footprint transect), and the number of individuals available to be detected at the site ($N_n$):
-
-$$p_{nj} = 1 - (1 - r_{nj}) ^ {N_n}$$ The model for this detection probability is then:
-
-$$y_{nj} \sim Bernoulli(p_{nj})$$ This model thus allows for $\lambda_n$ to be modelled via the camera counts and the results of detections along the transect.
-
-Finally, the Royle-Nichols model also allows us to estimate the rates at which with camera trap did not detect individuals at a site when they were present. Specifically we can use the average probability of detection of at least one individual at the camera trap, given individuals have expected abundance lambda ($\bar p$).
-
 # Setup
 
 Load in relevant packages for analysis, additionally, connect to the database. Camera trap and site data is stored on the database.
