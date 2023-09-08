@@ -348,7 +348,7 @@ snapshot_interval <- 2
 
 ## Model Options
 
-Below we list the models we are implementing, all have a hazard detection function, but we compare four different abundance formulas as well as the inclusion of the EVC random effect.
+Below we list the models we are implementing, all have a hazard detection function, but we compare four different abundance formulas as well as the inclusion of the EVC random effect within the abundance process.
 
 ```{r ModelScope}
 #Models to run 
@@ -366,12 +366,10 @@ models_to_run <- data.frame(formula = c("ab_formula_1",
 
 ### Full Models
 
-We can fit models using `cmdstanr`. Here we fit models using a poisson distribution. The models we compare are:
+We can fit models using the `cmdstanr` R package [@cmdstanr]. Here we fit models using a negative-binomial distribution. The models we compare are:
 
--   Model with several key abundance covariates and half-normal detection function
--   Model with key abundance covariates and hazard-rate detection function
--   Null-model (bioregion only) with half-normal detection function
--   Model with key abundance covariates, bioregion random-effect and an EVC group random effect.
+-   Model with several key abundance covariates and hazard-rate detection function and bioregion random effect
+-   Model with several key abundance covariates and hazard-rate detection function and bioregion + EVC random effect
 
 ```{r FitModels, eval = FALSE}
 model_fits <- list()
@@ -637,7 +635,7 @@ site_detection_plot <- function(data, regions, cams_curated, species_index) {
   
    lvls <- length(unique(cam_data$Detected, na.rm = T))
   
-plot <- ggplot2::ggplot(data = cam_data) +
+plot <- ggplot2::ggplot(data = cam_data %>% st_transform(3111)) +
   ggplot2::geom_sf(data = regions, alpha = 0.75, fill = "grey80") +
   ggplot2::geom_sf(aes(fill = Detected), shape = 21, size = 2, alpha = 0.75) +
   ggplot2::scale_fill_manual(values = delwp_pal(lvls), 
@@ -857,7 +855,7 @@ names(combined_occupancy_raster) <- c("Average Sambar Deer Occupancy Probability
                             "Average Red Deer Occupancy Probability", 
                             "Average Hog Deer Occupancy Probability")
 
-writeRaster(combined_occupancy_raster, "outputs/rasters/combined_occupancy_raster.tif", overwrite = T)
+# writeRaster(combined_occupancy_raster, "outputs/rasters/combined_occupancy_raster.tif", overwrite = T)
 writeRaster(combined_raster, "outputs/rasters/combined_deer_average_density.tif", overwrite = T)
 ```
 
@@ -964,18 +962,24 @@ abundance_table <- function(model, regions, pred_area, caption, species_index, r
                   `Area km2` = round(c(pred_area, sum(pred_area))), 
                   `Density (mean)` = round(trimmed_mean/`Area km2`, 2), 
                   `Density (5 %)` = round(q5/`Area km2`, 2),
-                  `Density (95 %)` = round(q95/`Area km2`, 2)) %>% 
+                  `Density (95 %)` = round(q95/`Area km2`, 2), 
+                  `Density mean (90% CI)` = paste0(`Density (mean)`, 
+                                                   " (", 
+                                                   `Density (5 %)`, 
+                                                   ", ", 
+                                                   `Density (95 %)`, 
+                                                   ")"), 
+                  CV = round(sd/trimmed_mean, 2)) %>% 
     dplyr::transmute(Region = variable, 
-                  `Trimmed Mean` = round(trimmed_mean), 
-                  Median = round(median), 
+                  `Trimmed mean` = round(trimmed_mean), 
+                  # Median = round(median), 
                   SD = round(sd), 
-                  MAD = round(mad),
+                  CV,
+                  # MAD = round(mad),
                   `5 %` = round(q5), 
                   `95 %` = round(q95), 
                   `Area km2`,
-                  `Density (mean)`,
-                  `Density (5 %)`,
-                  `Density (95 %)`)
+                  `Density mean (90% CI)`)
   
   if(return_data) {
     
@@ -986,7 +990,7 @@ abundance_table <- function(model, regions, pred_area, caption, species_index, r
     
     return(regional_abundance %>% 
              mutate(Species = species_names[species_index], across(2:8, ~ formatC(.x, digits = 0, format = "f", big.mark = ",") )) %>%
-             select(Species, everything()))
+             dplyr::select(Species, everything()))
   }
   
   kableExtra::kbl(regional_abundance, digits = 2, format = "html", caption = caption, format.args = list(big.mark = ",")) %>%
@@ -1450,6 +1454,16 @@ data_d3 <- data_for_plot %>%
   mutate(value = 1 - (1 - value)^3, 
          Density = "3 deer/km^2^")
 
+# d3 averages 
+data_d3_av <- data_d3 %>% 
+  group_by(Method = variable) %>%
+  summarise(mean = round(mean(value), 2),
+            q5 = round(quantile(value, 0.05), 2),
+            q95 = round(quantile(value, 0.95), 2)) %>%
+  ungroup() %>%
+  mutate(label = paste0("*p* = ", mean, " [90% CI: ", q5, ", ", q95, "]")) %>%
+  arrange(desc(mean))
+
 data_d5 <- data_for_plot %>% 
   mutate(value = 1 - (1 - value)^5, 
          Density = "5 deer/km^2^")
@@ -1472,6 +1486,8 @@ ggsave(plot = transect_det_plot, filename = "outputs/plots/transect_detection_pl
 transect_det_plot
 
 ```
+
+From these plots we can compare the detection rates between methods. For instance, when deer are present at a density of 3 per km^2^, than the highest probability of detection is from a `r data_d3_av$Method[1]` (`r data_d3_av$label[1]`), followed by `r data_d3_av$Method[2]` (`r data_d3_av$label[2]`), `r data_d3_av$Method[3]` (`r data_d3_av$label[3]`), `r data_d3_av$Method[4]` (`r data_d3_av$label[4]`), and lastly `r data_d3_av$Method[5]` (`r data_d3_av$label[5]`).
 
 ## Abundance Processes
 
@@ -1523,7 +1539,8 @@ bioreg <- VicmapR::vicmap_query("open-data-platform:vbioreg100") %>%
     VicmapR::collect() %>%
   group_by(bioregion, bioregion_code) %>%
   summarise(geometry = st_union(geometry)) %>%
-  ungroup()
+  ungroup() %>%
+  st_transform(3111)
 
 bioregion_nhat <- model_fits[[top]]$summary("Nhat_bioreg", prob_occ = ~ mean(. > 0), trimmed_mean = ~mean(., trim = 0.025), posterior::default_summary_measures())
 
