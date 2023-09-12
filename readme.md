@@ -10,3 +10,5 @@ This repository contains analysis of modelling deer abundance and distribution i
 +  `outputs/` is where models and model outputs such as rasters and plots are located. Note that the stan model draws are not git tracked as they are very large files.  
 
 +  `stan/` is where the stan models used in the analysis are stored.  
+
++  `docs/` is where the rendered Rmarkdown html and interactive maps are stored. 

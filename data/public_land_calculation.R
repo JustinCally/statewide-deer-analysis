@@ -45,6 +45,14 @@ plm_old_f <- plm_f %>%
 
 plm_c <- bind_rows(plm_nw, plm_old_f)
 
+crown_land_by_reserve <- plm_c %>%
+  group_by(label) %>%
+  summarise(geometry = st_union(geometry),
+            area = sum(area_ha))
+
+saveRDS(crown_land_by_reserve, "data/crown_land_by_reserve.rds", compress = "xz")
+saveRDS(plm_c, "data/plm_c.rds", compress = "xz")
+
 crown_land <- plm_c %>% st_union()
 
 # filter islands
