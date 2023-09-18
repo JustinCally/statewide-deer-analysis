@@ -240,6 +240,7 @@ The second model uses the combination of bioregion and EVC as random-effects on 
 ```
 
 ```{r models, echo = FALSE, warning=FALSE, include=FALSE}
+model_negbin_ms_co <- cmdstan_model(here::here("stan", "count_only_negbin_ms.stan"))
 model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"))
 model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
 ```

@@ -7,7 +7,7 @@ This repository contains analysis of modelling deer abundance and distribution i
 
 +  `functions/` has a suite of functions used in data preparation and then model interrogation.  
 
-+  `outputs/` is where models and model outputs such as rasters and plots are located. Note that the stan model draws are not git tracked as they are very large files.  
++  `outputs/` is where models and model outputs such as rasters and plots are located. Note that the STAN model draws are not git tracked as they are very large files.  
 
 +  `stan/` is where the stan models used in the analysis are stored.  
 
