@@ -1723,24 +1723,23 @@ activity_modeled <-model_fits[[top]]$summary("activ")$mean
                        labels = 2*seq(0, 12)) + 
     delwp_theme()
 ```
+
 ### Seasonal deployments  
 
 Our surveys took place in Spring, Summer and Autumn. Below we show the camera deployment dates for the 317 sites. 
 
-```{r Operation, fig.height = 8, fig.width = 5, fig.cap="Deployment times of the cameras across the survey period"}
-seasons <- data.frame(Date=seq.Date(from = as.Date("2021-08-01"), 
-                               to = as.Date("2023-07-01"), by = "month"),
-                 Season = c('Winter',
-                            'Spring', 'Spring', 'Spring',
+```{r Operation, fig.height = 8, fig.width = 5, fig.cap="Deployment times of the cameras across the survey period", warning=FALSE, message=FALSE}
+seasons <- data.frame(Date=seq.Date(from = as.Date("2021-09-01"), 
+                               to = as.Date("2023-05-01"), by = "month"),
+                 Season = c('Spring', 'Spring', 'Spring',
                             'Summer', 'Summer', 'Summer',
                             'Autumn', 'Autumn', 'Autumn', 
                             'Winter', 'Winter', 'Winter',
                             'Spring', 'Spring', 'Spring',
                             'Summer', 'Summer', 'Summer',
-                            'Autumn', 'Autumn', 'Autumn',
-                            'Winter', 'Winter')) %>%
-  mutate(DateEnd = seq.Date(from = as.Date("2021-09-01"), 
-                               to = as.Date("2023-08-01"), by = "month"), 
+                            'Autumn', 'Autumn', 'Autumn')) %>%
+  mutate(DateEnd = seq.Date(from = as.Date("2021-10-01"), 
+                               to = as.Date("2023-06-01"), by = "month"), 
          Season = factor(Season, levels = c("Summer", "Autumn", "Winter", "Spring"))) %>%
   cross_join(data.frame(SiteID = cams_curated$SiteID)) %>%
   group_by(Date, DateEnd, Season) %>%
@@ -1749,7 +1748,7 @@ seasons <- data.frame(Date=seq.Date(from = as.Date("2021-08-01"),
   ungroup()
   
 
-cams_curated %>%
+cam_op_plot <- cams_curated %>%
   # mutate(DateDeploy = as.Date(format(DateDeploy, "%m-%d"),"%m-%d"), 
   #        DateRetrieve = as.Date(format(DateRetrieve, "%m-%d"), "%m-%d")) %>%
   ggplot() +
@@ -1763,8 +1762,10 @@ cams_curated %>%
   delwp_theme() +
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.title.y = element_blank())
 
-```
+ggsave(plot = cam_op_plot, filename = "outputs/plots/cam_op_plot.png", height = 2400, width = 2000, units = "px")
 
+cam_op_plot
+```
 
 ## Abundance Processes
 
@@ -2052,7 +2053,8 @@ While our main predictor of interest is the density of deer at a site, we also c
 -   TWIND (Topographic wetness index)\
 -   Forest Edge\
 -   Canopy Cover\
--   Top Height
+-   Top Height\
+-   Wallaby Presence\
 -   EVC Group (random effect with 19 groups)
 
 ## Data Preparation
