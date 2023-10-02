@@ -29,6 +29,10 @@ knit: |
   })
 ---
 
+```{css, echo=FALSE}
+pre, code {white-space:pre !important; overflow-x:auto}
+```
+
 # About this document  
 
 This following document has been written in RMarkdown and contains embedded analyses using `R` and `STAN` programming languages. Using this `RMarkdown` enables us to keep all the analyses used for the report in a single repository and file. This RMarkdown has been rendered to HTML and is available at https://justincally.github.io/statewide-deer-analysis/. Analyses in this document are carried out sequentially, meaning that some objects, functions or variables needed in later code chunks were made earlier. This repository and RMarkdown also uses a database connection to a secure DEECA database and thus cannot be reproduced without database access. However the main data used in our abundance model has been packaged up as `data/multispecies_data.rds` and is available in the github repository for users wanting to re-run our model.
@@ -844,7 +848,7 @@ pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
   pattern = "[*]", negate = T)]], mean)
 
 mean_raster <- list()
-occ_raster <- list()
+sd_raster <- list()
 mean_raster_discrete <- list()
 
 # gp_preds_draws_all <- model_fits[[top]]$draws("pred", format = "matrix")
@@ -882,6 +886,9 @@ values(mean_raster_discrete[[i]]) <- cut(values(mean_raster_discrete[[i]]) ,
 # occ_raster[[i]] <- pred_raster
 # terra::values(occ_raster[[i]])[!is.na(terra::values(occ_raster[[i]]))] <- apply(gp_preds_draws_sp, 2, function(x) sum(x > 0)/length(x))
 
+sd_raster[[i]] <- pred_raster
+terra::values(sd_raster[[i]])[!is.na(terra::values(sd_raster[[i]]))] <- apply(gp_preds_draws_sp, 2, sd)
+
 }
 
 # combine mean rasters together
@@ -891,6 +898,12 @@ names(combined_raster) <- c("Average Sambar Deer Density (per km2)",
                             "Average Red Deer Density (per km2)", 
                             "Average Hog Deer Density (per km2)")
 
+combined_sd_raster <- rast(sd_raster)
+names(combined_sd_raster) <- c("Sambar Deer SD",
+                            "Fallow Deer SD",
+                            "Red Deer SD",
+                            "Hog Deer SD")
+
 # combined_occupancy_raster <- rast(occ_raster)
 # names(combined_occupancy_raster) <- c("Average Sambar Deer Occupancy Probability", 
 #                             "Average Fallow Deer Occupancy Probability", 
@@ -899,6 +912,7 @@ names(combined_raster) <- c("Average Sambar Deer Density (per km2)",
 
 # writeRaster(combined_occupancy_raster, "outputs/rasters/combined_occupancy_raster.tif", overwrite = T)
 writeRaster(combined_raster, "outputs/rasters/combined_deer_average_density.tif", overwrite = T)
+writeRaster(combined_sd_raster, "outputs/rasters/combined_deer_sd.tif", overwrite = T)
 ```
 
 ```{r PlotSave, fig.height=24, fig.width=8, fig.cap="Abundance of Sambar, Fallow, Red and Hog Deer across Victoria, dark-grey area reflects area not included in predictions (i.e. not public land)"}
@@ -1709,6 +1723,47 @@ activity_modeled <-model_fits[[top]]$summary("activ")$mean
                        labels = 2*seq(0, 12)) + 
     delwp_theme()
 ```
+### Seasonal deployments  
+
+Our surveys took place in Spring, Summer and Autumn. Below we show the camera deployment dates for the 317 sites. 
+
+```{r Operation, fig.height = 8, fig.width = 5, fig.cap="Deployment times of the cameras across the survey period"}
+seasons <- data.frame(Date=seq.Date(from = as.Date("2021-08-01"), 
+                               to = as.Date("2023-07-01"), by = "month"),
+                 Season = c('Winter',
+                            'Spring', 'Spring', 'Spring',
+                            'Summer', 'Summer', 'Summer',
+                            'Autumn', 'Autumn', 'Autumn', 
+                            'Winter', 'Winter', 'Winter',
+                            'Spring', 'Spring', 'Spring',
+                            'Summer', 'Summer', 'Summer',
+                            'Autumn', 'Autumn', 'Autumn',
+                            'Winter', 'Winter')) %>%
+  mutate(DateEnd = seq.Date(from = as.Date("2021-09-01"), 
+                               to = as.Date("2023-08-01"), by = "month"), 
+         Season = factor(Season, levels = c("Summer", "Autumn", "Winter", "Spring"))) %>%
+  cross_join(data.frame(SiteID = cams_curated$SiteID)) %>%
+  group_by(Date, DateEnd, Season) %>%
+  summarise(SiteIDmin = min(SiteID), 
+            SiteIDmax = max(SiteID)) %>%
+  ungroup()
+  
+
+cams_curated %>%
+  # mutate(DateDeploy = as.Date(format(DateDeploy, "%m-%d"),"%m-%d"), 
+  #        DateRetrieve = as.Date(format(DateRetrieve, "%m-%d"), "%m-%d")) %>%
+  ggplot() +
+    geom_rect(data = seasons, aes(xmin=Date, xmax=DateEnd, 
+    ymin=SiteIDmin, ymax=SiteIDmax, 
+    fill=Season
+  ), alpha = 0.5) + 
+  geom_segment(aes(x = DateDeploy, xend = DateRetrieve, y = SiteID, yend = SiteID), linewidth = 0.8, colour = "grey30") +
+  scale_x_date(date_breaks = "6 months", date_labels="%b-%y", name = "Deployment Date") +
+  scale_fill_manual(values = c("#AF272F", "#E57200", "#0072CE", "#CEDC00")) +
+  delwp_theme() +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.title.y = element_blank())
+
+```
 
 
 ## Abundance Processes
@@ -2029,9 +2084,16 @@ site_density_df <- cams_curated %>%
   left_join(multispecies_data[["raw_data"]] %>% select(-EVC, - BIOREGION)) %>%
   mutate(TSLF_bin = as.factor(round(TSLF_bin)))
 
+wallaby_pa <- tbl(con, dbplyr::in_schema("camtrap", "processed_site_substation_presence_absence")) %>%
+  filter(scientific_name == "Wallabia bicolor" & ProjectShortName %in% project_short_name) %>%
+  collect() %>%
+  transmute(SiteID, 
+            Wallaby = as.logical(Presence))
+
  site_vars <- dplyr::tbl(con, dbplyr::in_schema("deervic", "curated_site_data")) %>%
     dplyr::filter(SiteID %in% !!c(cams_curated$SiteID, "47191")) %>%
     dplyr::collect() %>%
+    dplyr::left_join(wallaby_pa) %>%
     dplyr::mutate(HerbaceousUnderstoryCover = NNWHUCover + ENWHUCover,
                   Exotics = EWUCover + ENWHUCover,
                   ExoticPresence = as.integer(as.logical(Exotics)),
@@ -2073,6 +2135,7 @@ bform1 <- bf(mvbind(BGroundCover,
                                     + scale(sqrt(ForestEdge))
                                     + scale(sqrt(CanopyCov))
                                     + scale(sqrt(TopHeight))
+                                    + Wallaby
                                     + (1|EVC)) 
 
 # Specifiy model families and links
@@ -2117,6 +2180,8 @@ veg_coefs <- fixef(vegfit, probs = c(0.05, 0.95), pars = c("BGroundCover_AllDeer
                            "Presence of saplings",
                            "Presence of exotic flora"), " ~ Deer Density"))
 
+all_veg_coef <- fixef(vegfit, probs = c(0.05, 0.95))
+
 print_conditional <- function(x, i, d = 3, OR = FALSE) {
   row <- x[i,]
   name <- "\\beta"
@@ -2135,7 +2200,7 @@ veg_coefs_save <- veg_coefs %>%
 
 write.csv(veg_coefs_save, "outputs/tables/veg_coefs.csv", row.names = F)
 
-
+options(width=600)
 summary(vegfit) 
 ```
 
