@@ -1,0 +1,16 @@
+Species,Detection,Number of Sites,Average Density,SD between sites
+Sambar,Not seen,182,0.81,1.29
+Sambar,Only detected on transects,31,2.46,1.71
+Sambar,Only seen on cameras,50,3.34,4.71
+Sambar,Seen on both camera and transect,54,4.16,2.51
+Fallow,Not seen,259,0.52,1.53
+Fallow,Only detected on transects,28,0.97,1.43
+Fallow,Only seen on cameras,20,1.37,1.38
+Fallow,Seen on both camera and transect,10,1.89,1.62
+Red,Not seen,304,0.05,0.19
+Red,Only detected on transects,1,1.23,NA
+Red,Only seen on cameras,5,1.47,1.48
+Red,Seen on both camera and transect,7,2.01,2.37
+Hog,Not seen,293,0.27,1.18
+Hog,Only detected on transects,2,2.03,2.71
+Hog,Only seen on cameras,22,3.1,2.39

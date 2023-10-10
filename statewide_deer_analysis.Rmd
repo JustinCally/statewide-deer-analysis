@@ -778,7 +778,7 @@ site_density_plot(red_preds, vic_regions, species = "Red"),
 site_density_plot(hog_preds, vic_regions, species = "Hog"), ncol = 1)
 ```
 
-Average density estimates varied across sites for all four species. Sambar deer were the most commonly detected species on the camera traps (`r sum(rowSums(multispecies_data$n_obs[,,1]) > 0)`/`r multispecies_data$n_site` sites), and density estimates at sites ranged from `r round(min(site_deer_predictions$Sambar$mean),1)` to `r round(max(site_deer_predictions$Sambar$mean),2)` deer/km^2^, for fallow, fewer site detections (`r sum(rowSums(multispecies_data$n_obs[,,2]) > 0)`), but more variability in site density gave a range between `r round(min(site_deer_predictions$Fallow$mean),2)` and `r round(max(site_deer_predictions$Fallow$mean),2)` deer/km^2^. Red deer were only detected on `r sum(rowSums(multispecies_data$n_obs[,,3]) > 0)` sites with densities ranging from `r round(min(site_deer_predictions$Red$mean),2)` to `r round(max(site_deer_predictions$Red$mean),2)`. Finally, Hog Deer, which were only detected on `r sum(rowSums(multispecies_data$n_obs[,,4]) > 0)` cameras in South Gippsland, had site densities ranging from `r round(min(site_deer_predictions$Hog$mean),2)` to `r round(max(site_deer_predictions$Hog$mean),2)` deer/km^2^.
+Average density estimates varied across sites for all four species. Sambar deer were the most commonly detected species on the camera traps (`r sum(rowSums(multispecies_data$n_obs[,,1]) > 0)`/`r multispecies_data$n_site` sites), and density estimates at sites ranged from `r round(min(site_deer_predictions$Sambar$mean),2)` to `r round(max(site_deer_predictions$Sambar$mean),2)` deer/km^2^ (mean = `r round(mean(site_deer_predictions$Sambar$mean),2)`, sd = `r round(sd(site_deer_predictions$Sambar$mean),2)`), for fallow, fewer site detections (`r sum(rowSums(multispecies_data$n_obs[,,2]) > 0)`), but more variability in site density gave a range between `r round(min(site_deer_predictions$Fallow$mean),2)` and `r round(max(site_deer_predictions$Fallow$mean),2)` deer/km^2^ (mean = `r round(mean(site_deer_predictions$Fallow$mean),2)`, sd = `r round(sd(site_deer_predictions$Fallow$mean),2)`). Red deer were only detected on `r sum(rowSums(multispecies_data$n_obs[,,3]) > 0)` sites with densities ranging from `r round(min(site_deer_predictions$Red$mean),2)` to `r round(max(site_deer_predictions$Red$mean),2)` (mean = `r round(mean(site_deer_predictions$Red$mean),2)`, sd = `r round(sd(site_deer_predictions$Red$mean),2)`). Finally, Hog Deer, which were only detected on `r sum(rowSums(multispecies_data$n_obs[,,4]) > 0)` cameras in South Gippsland, had site densities ranging from `r round(min(site_deer_predictions$Hog$mean),2)` to `r round(max(site_deer_predictions$Hog$mean),2)` deer/km^2^ (mean = `r round(mean(site_deer_predictions$Hog$mean),2)`, sd = `r round(sd(site_deer_predictions$Hog$mean),2)`).
 
 ### Site-density Summaries
 
@@ -809,7 +809,8 @@ density_summary_table <- function(preds, model_data, species, species_index) {
                                    CameraDetection == 1 & OnlyTransect == 1 ~ "Seen on both camera and transect")) %>%
     group_by(`Species`, `Detection`) %>%
     summarise(`Number of Sites` = n(),
-              `Average Density` = mean(mean)) %>%
+              `Average Density` = round(mean(mean), 2), 
+              `SD between sites` = round(sd(mean), 2)) %>%
     ungroup()
   
   return(preds_sum)
@@ -824,6 +825,8 @@ density_summary <- bind_rows(
                         species = "Red", species_index = 3),
   density_summary_table(hog_preds, multispecies_data, 
                         species = "Hog", species_index = 4))
+
+readr::write_csv(x = density_summary, file = "outputs/tables/site_group_estimates.csv")
 
 density_summary %>%
   kbl(format = "html", digits = 2, caption = "Average (mean) density estimates at the various groups of sites (according to detections)") %>%
