@@ -23,7 +23,11 @@ buffalo <- vicmap_query("parkres") %>%
   st_transform(3111) %>%
   st_combine()
 
-site_ns <- c(10, 20, 30, 40, 50, 60)
+survey_area <- st_area(buffalo) %>% units::set_units("km2")
+
+site_ns <- c(10, 20, 30, 40, 50, 60, 80, 100, 120, 200, 300)
+
+site_idx <- 11
 
 sample_locs <- sapply(site_ns, function(x) st_sample(buffalo, x, type = "hexagonal"))
 
@@ -32,6 +36,32 @@ sample_locs <- sapply(site_ns, function(x) st_sample(buffalo, x, type = "hexagon
 combined_raster <- rast("outputs/rasters/combined_deer_average_density.tif")
 combined_sd_raster <- rast("outputs/rasters/combined_deer_sd.tif")
 
-abundance_est <- terra::extract(combined_raster, vect(sample_locs[[6]]), ID = F)
+abundance_area <- terra::extract(combined_raster, vect(buffalo), ID = F)
 
-count_est <- abundance_est*det_p*avail*survey_effort[4]
+abundance_est <- terra::extract(combined_raster, vect(sample_locs[[site_idx]]), ID = F)
+sd_est <- terra::extract(combined_sd_raster, vect(sample_locs[[site_idx]]), ID = F)
+
+species_idx <- 1
+
+raw_counts <- matrix(nrow = length(sample_locs[[site_idx]]), ncol = 1000)
+dens_est <- matrix(nrow = length(sample_locs[[site_idx]]), ncol = 1000)
+
+for(i in 1:length(sample_locs[[site_idx]])) {
+raw_counts[i,] <- rnbinom(1000,mu=abundance_est[i,species_idx]*det_p*avail*survey_effort[4],size=abundance_est[i,species_idx]^2/((sd_est[i,species_idx]^2)-abundance_est[i,species_idx]))
+dens_est[i,] <- raw_counts[i,] /(det_p*avail*survey_effort[4])
+}
+
+dens_mean <- vector()
+ab_mean <- vector()
+for(j in 1:1000) {
+  dens_mean[j] <- mean(dens_est[,j])
+  ab_mean[j] <- dens_mean[j]*survey_area
+}
+
+grand_mean <- mean(ab_mean)
+grand_cv <- sd(ab_mean)/grand_mean
+grand_mean
+grand_cv
+
+#true mean
+sum(abundance_area[,species_idx])

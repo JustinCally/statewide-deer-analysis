@@ -7,7 +7,7 @@ author:
     url: https://justincally.github.io/blog/
     affiliation: Arthur Rylah Institute
     affiliation_url: https://www.ari.vic.gov.au/
-date: "12 September, 2023"
+date: 2023-10-11
 output:
   distill::distill_article:
     self_contained: true
