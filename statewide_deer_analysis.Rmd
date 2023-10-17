@@ -700,7 +700,7 @@ detection_plot <- cowplot::plot_grid(site_detection_plot(multispecies_data, regi
 site_detection_plot(multispecies_data, regions = vic_regions, cams_curated = cams_curated, species_index = 2),
 site_detection_plot(multispecies_data, regions = vic_regions, cams_curated = cams_curated, species_index = 3),
 site_detection_plot(multispecies_data, regions = vic_regions, cams_curated = cams_curated, species_index = 4), ncol = 2, 
-labels = c("A) Sambar Deer", "B) Fallow Deer", "C) Red Deer", "D) Hog Deer"), greedy = TRUE)
+labels = c("A) Sambar deer", "B) Fallow deer", "C) Red deer", "D) Hog deer"), greedy = TRUE)
 
 ggsave(plot = detection_plot, filename = "outputs/plots/all_detection_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
 
@@ -751,7 +751,7 @@ plot <- ggplot2::ggplot(data = densities) +
                              na.value = "transparent", na.translate = F,
                              name = "", guide = guide_legend(override.aes = list(size = 6))) +
   scale_alpha_continuous(range = c(0.5,1), guide = "none") +
-  labs(title = paste0('Abundance of ',species ,' Deer'), fill = bquote('Deer per'~km^2)) +
+  labs(title = paste0('Abundance of ',species ,' deer'), fill = bquote('Deer per'~km^2)) +
   theme_bw() +
   theme(legend.text = element_text(size = 18), legend.key.size = unit(1, "cm"),
         title = element_text(size = 20))
@@ -974,9 +974,9 @@ ggsave(plot = red_abundance_plot, filename = "outputs/plots/red_abundance_plot.p
 ggsave(plot = hog_abundance_plot, filename = "outputs/plots/hog_abundance_plot.png", 
        width = 2400, height = 1600, units = "px")
 
-ggsave(plot = cowplot::plot_grid(sambar_abundance_plot, fallow_abundance_plot, red_abundance_plot, hog_abundance_plot, ncol = 2, labels = c("A) Sambar Deer", "B) Fallow Deer", "C) Red Deer", "D) Hog Deer"), greedy = F), filename = "outputs/plots/all_abundance_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
+ggsave(plot = cowplot::plot_grid(sambar_abundance_plot, fallow_abundance_plot, red_abundance_plot, hog_abundance_plot, ncol = 2, labels = c("A) Sambar deer", "B) Fallow deer", "C) Red deer", "D) Hog deer"), greedy = F), filename = "outputs/plots/all_abundance_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
 
-cowplot::plot_grid(sambar_abundance_plot, fallow_abundance_plot, red_abundance_plot, hog_abundance_plot, ncol = 1, labels = c("A) Sambar Deer", "B) Fallow Deer", "C) Red Deer", "D) Hog Deer"))
+cowplot::plot_grid(sambar_abundance_plot, fallow_abundance_plot, red_abundance_plot, hog_abundance_plot, ncol = 1, labels = c("A) Sambar deer", "B) Fallow deer", "C) Red deer", "D) Hog deer"))
 ```
 
 ### Regional Abundance Estimates
@@ -1238,7 +1238,7 @@ plot_threshold <- function(raster, state, crop = NULL) {
     ggplot2::scale_alpha_manual(values = c(0.25, 0.65, 0.85), 
                                 na.value = "transparent", 
                                 na.translate = F) +
-    ggplot2::labs(alpha = "Distribution \nRange", fill = "Distribution \nRange") +
+    ggplot2::labs(alpha = "Distribution \nrange", fill = "Distribution \nrange") +
     ggspatial::annotation_scale() +
     delwp_theme()
   
@@ -1258,7 +1258,7 @@ red_th <- plot_threshold(joint_threshold[[3]],
 hog_th <- plot_threshold(joint_threshold[[4]], 
                state = state, crop = gippsland)
 
-threshold_combined_plot <- cowplot::plot_grid(sambar_th, fallow_th, red_th, hog_th, ncol = 2, labels = c("A) Sambar Deer", "B) Fallow Deer", "C) Red Deer", "D) Hog Deer"), greedy = F)
+threshold_combined_plot <- cowplot::plot_grid(sambar_th, fallow_th, red_th, hog_th, ncol = 2, labels = c("A) Sambar deer", "B) Fallow deer", "C) Red deer", "D) Hog deer"), greedy = F)
 
 ggsave(plot = threshold_combined_plot, filename = "outputs/plots/all_threshold_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
 
@@ -1560,7 +1560,7 @@ detection_plot_HN <- ggplot(aes(x = Distance), data = det_curve_sum) +
   scale_fill_manual(values = unname(delwp_cols[c(1,2,3,8)])) +
   scale_colour_manual(values = unname(delwp_cols[c(1,2,3,8)])) +
   ylab("Detection probability (p)") +
-  labs(fill = "Herbaceous\nUnderstorey\nCover", colour = "Herbaceous\nUnderstorey\nCover") +
+  labs(fill = "Herbaceous\nunderstorey\ncover", colour = "Herbaceous\nunderstorey\ncover") +
   theme_classic()
 
 ggsave(plot = detection_plot_HN, filename = "outputs/plots/hazard_detection_plot.png", width = 2400, height = 1600, units = "px")
@@ -1760,7 +1760,7 @@ cam_op_plot <- cams_curated %>%
     fill=Season
   ), alpha = 0.5) + 
   geom_segment(aes(x = DateDeploy, xend = DateRetrieve, y = SiteID, yend = SiteID), linewidth = 0.8, colour = "grey30") +
-  scale_x_date(date_breaks = "6 months", date_labels="%b-%y", name = "Deployment Date") +
+  scale_x_date(date_breaks = "6 months", date_labels="%b-%y", name = "Deployment date") +
   scale_fill_manual(values = c("#AF272F", "#E57200", "#0072CE", "#CEDC00")) +
   delwp_theme() +
   theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.title.y = element_blank())
@@ -1877,8 +1877,8 @@ bioregion_ggplot <- function(effect_df, title) {
                   size = 2.5, stat = "sf_coordinates", colour = "white") +
     scale_fill_gradient2(low = "#B9C600",
                          mid = delwp_cols[["Teal"]], 
-                         high = delwp_cols[["Navy"]], guide = guide_coloursteps(title = "Average Effect\n (log-scale)")) +
-    labs(x = "Longitude", y = "Latitude") +
+                         high = delwp_cols[["Navy"]], guide = guide_coloursteps(title = "Average effect\n (log-scale)")) +
+    labs(x = "", y = "") +
     ggspatial::annotation_scale() +
     delwp_theme()
 }
@@ -1888,7 +1888,7 @@ bioregion_ggplot <- function(effect_df, title) {
 cpb <- cowplot::plot_grid(bioregion_ggplot(bioregion_effects[[1]], "Sambar"),
 bioregion_ggplot(bioregion_effects[[2]], "Fallow"),
 bioregion_ggplot(bioregion_effects[[3]], "Red"),
-bioregion_ggplot(bioregion_effects[[4]], "Hog"), labels = c("A) Sambar Deer", "B) Fallow Deer", "C) Red Deer", "D) Hog Deer"), ncol = 2)
+bioregion_ggplot(bioregion_effects[[4]], "Hog"), labels = c("A) Sambar deer", "B) Fallow deer", "C) Red deer", "D) Hog deer"), ncol = 2)
 
 ggsave(plot = cpb, filename = "outputs/plots/bioregion_effects_plot.png", width = 4800, height = 3200, units = "px", bg = "white")
 
@@ -1906,11 +1906,11 @@ beta_summaries <- model_fits[[top]]$summary("beta_psi")
 beta_table_summary <- beta_summaries %>% 
   mutate(species = factor(rep(species_names, times = 6),levels = species_names), 
          covariate = rep(c("(Intercept)",
-              "Bare Soil (%)", 
+              "Bare soil (%)", 
               "Nitrogen (%)", 
-              "Distance to Pastural Land (m)", 
-              "Precipitation Seasonality", 
-              'Forest Edge per km^2^ (m)'), each = 4)) %>%
+              "Distance to pastural land (m)", 
+              "Precipitation seasonality", 
+              'Forest edge per km^2^ (m)'), each = 4)) %>%
   arrange(species) %>%
   select(species, covariate, mean, sd, q5, q95)
 
@@ -1945,11 +1945,11 @@ phi_vars <- unlist(stringr::str_remove_all(string = labels(terms(ab_to_use)), pa
 phi_logs <- unlist(stringr::str_detect(string = labels(terms(ab_to_use)), pattern =  "log\\("))
 phi_sqrts <- c(0.5,0.5,1,1,0.5)
 
-phi_labs <- c("Bare Soil (%)", 
+phi_labs <- c("Bare soil (%)", 
               "Nitrogen (%)", 
-              "Distance to Pastural Land (m)", 
-              "Precipitation Seasonality", 
-              'Forest Edge per km^2^ (m)')
+              "Distance to pastural land (m)", 
+              "Precipitation seasonality", 
+              'Forest edge per km^2^ (m)')
 
 fac <- c(FALSE, FALSE, FALSE, FALSE, FALSE)
 
@@ -1969,22 +1969,22 @@ ab_joined_list[[j]] <- bind_rows(ab_marginal_effects)
 }
 
 all_me_data <- bind_rows(ab_joined_list) %>%
-  mutate(param = case_when(param == "BareSoil" ~ "Bare Soil (%)", 
+  mutate(param = case_when(param == "BareSoil" ~ "Bare soil (%)", 
                            param == "Nitrogen" ~ "Nitrogen (%)", 
-                           param == "PastureDistance" ~ "Distance to Pastural Land (m)", 
-                           param == "BIO15" ~ "Precipitation Seasonality", 
-                           param == "ForestEdge" ~ 'Forest Edge per km^2^ (m)'))
+                           param == "PastureDistance" ~ "Distance to pastural land (m)", 
+                           param == "BIO15" ~ "Precipitation seasonality", 
+                           param == "ForestEdge" ~ 'Forest edge per km^2^ (m)'))
   
 
-cov_plot <- marginal_effects_plot_cmd_all(all_me_data %>% mutate(species = factor(species, levels = species_names), 
+cov_plot <- marginal_effects_plot_cmd_all(all_me_data %>% mutate(species = factor(stringr::str_to_sentence(species), levels = stringr::str_to_sentence(species_names)), 
                                                      param = factor(param, levels = phi_labs)), 
                           col = "DarkGreen", 
                           factor = FALSE,
-                          ylab = "Contribution to Abundance (log-scale)") +
+                          ylab = "Contribution to abundance (log-scale)") +
       ggplot2::facet_grid(species~param, scales = "free") +
   delwp_theme() +
   theme(strip.text = ggtext::element_markdown()) +
-  xlab("Covariate Value")
+  xlab("Covariate value")
 
 ggsave(plot = cov_plot, filename = "outputs/plots/abundance_covariate_effects.png", width = 3000, height = 2000, units = "px")
 
@@ -2226,18 +2226,18 @@ plot_deer_relationship <- function(plot_data, plot_data_50, yaxis) {
     geom_smooth(aes(x = AllDeerDensity, y = `estimate__`), 
                 colour = delwp_cols[["Navy"]], method = "loess", formula = y~x, linewidth = 2) +
     ylab(paste(yaxis)) +
-    xlab("Deer Density (per km^2^)") +
+    xlab("Deer density (per km^2^)") +
     delwp_theme() +
     theme(axis.title.x = ggtext::element_markdown())
     
 }
 
-vegplot <- cowplot::plot_grid(plot_deer_relationship(plot_list[[1]], plot_list_50[[1]], "Bare Ground Cover"), 
-                   plot_deer_relationship(plot_list[[2]], plot_list_50[[2]], "Native Woody Understorey Cover"),
-                   plot_deer_relationship(plot_list[[3]], plot_list_50[[3]], "Native Herbaceous Understorey Cover"),
-                   plot_deer_relationship(plot_list[[4]], plot_list_50[[4]], "Seedling Counts") + scale_y_sqrt(),
-                   plot_deer_relationship(plot_list[[5]], plot_list_50[[5]], "Sapling Counts"),
-                   plot_deer_relationship(plot_list[[6]], plot_list_50[[6]], "Presence of Exotic Flora"), 
+vegplot <- cowplot::plot_grid(plot_deer_relationship(plot_list[[1]], plot_list_50[[1]], "Bare ground cover"), 
+                   plot_deer_relationship(plot_list[[2]], plot_list_50[[2]], "Native woody understorey cover"),
+                   plot_deer_relationship(plot_list[[3]], plot_list_50[[3]], "Native herbaceous understorey cover"),
+                   plot_deer_relationship(plot_list[[4]], plot_list_50[[4]], "Seedling counts") + scale_y_sqrt(),
+                   plot_deer_relationship(plot_list[[5]], plot_list_50[[5]], "Sapling counts"),
+                   plot_deer_relationship(plot_list[[6]], plot_list_50[[6]], "Presence of exotic flora"), 
                    ncol = 3, labels = "AUTO")
 
 ggsave(plot = vegplot, filename = "outputs/plots/vegetation_effects_plot.png", width = 3400, height = 2200, units = "px")
