@@ -55,3 +55,4 @@ data/asot_operational_areas/asot_operational_areas.dbf
 data/asot_operational_areas/asot_operational_areas.prj
 data/asot_operational_areas/asot_operational_areas.shp
 data/asot_operational_areas/asot_operational_areas.shx
+outputs/models/fit_multispecies_3_8.rds

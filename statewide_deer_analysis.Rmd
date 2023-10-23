@@ -1048,7 +1048,7 @@ abundance_table <- function(model, regions, pred_area, caption, species_index, r
   }
     
     return(regional_abundance %>% 
-             mutate(Species = species_names[species_index], across(2:8, ~ formatC(.x, digits = 0, format = "f", big.mark = ",") )) %>%
+             mutate(Species = species_names[species_index], across(c(2,3,5:8), ~ formatC(.x, digits = 0, format = "f", big.mark = ",") )) %>%
              dplyr::select(Species, everything()))
   }
   
