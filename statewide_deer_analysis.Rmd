@@ -785,7 +785,7 @@ Average density estimates varied across sites for all four species. Sambar deer 
 As a check on model expectations we compare the average modelled densities at sites with (i) no evidence of deer, (ii) evidence of deer present on only transects, (iii) evidence of deer present on only the cameras, and (iv) evidence of deer on both cameras and transect. We expect that average densities are generally higher at sites that detected some form of deer than sites that did not detect any sign of deer. Additionally, we would also expect average densities to be generally higher at sites that had detections on cameras than those with only detections from transects. The table below shows these expectations to be correct.
 
 ```{r siteSummary, warning = FALSE, message = FALSE}
-density_summary_table <- function(preds, model_data, species, species_index) {
+density_summary_table <- function(preds, model_data, species, species_index, return_samples = FALSE) {
   
   cam_seen <- as.integer(as.logical(rowSums(model_data$n_obs[,,species_index])))
   
@@ -806,7 +806,13 @@ density_summary_table <- function(preds, model_data, species, species_index) {
            `Detection` = case_when(CameraDetection == 0 & AnyDetection == 0 ~ "Not seen", 
                                    CameraDetection == 0 & AnyDetection == 1 ~ "Only detected on transects", 
                                    CameraDetection == 1 & OnlyTransect == 0 ~ "Only seen on cameras", 
-                                   CameraDetection == 1 & OnlyTransect == 1 ~ "Seen on both camera and transect")) %>%
+                                   CameraDetection == 1 & OnlyTransect == 1 ~ "Seen on both camera and transect")) 
+  
+  if(return_samples) {
+    return(preds_sum)
+  }
+  
+ preds_sum <- preds_sum %>%
     group_by(`Species`, `Detection`) %>%
     summarise(`Number of Sites` = n(),
               `Average Density` = round(mean(mean), 2), 
@@ -816,6 +822,18 @@ density_summary_table <- function(preds, model_data, species, species_index) {
   return(preds_sum)
 }
 
+density_summary_long <- bind_rows(
+  density_summary_table(sambar_preds, multispecies_data, 
+                        species = "Sambar", species_index = 1, return_samples = T),
+  density_summary_table(fallow_preds, multispecies_data, 
+                        species = "Fallow", species_index = 2, return_samples = T),
+  density_summary_table(red_preds, multispecies_data, 
+                        species = "Red", species_index = 3, return_samples = T),
+  density_summary_table(hog_preds, multispecies_data, 
+                        species = "Hog", species_index = 4, return_samples = T)) %>%
+  mutate(Species = factor(Species, levels = c("Sambar", "Fallow", "Red", "Hog")))
+
+# Get plot of distributions 
 density_summary <- bind_rows(
   density_summary_table(sambar_preds, multispecies_data, 
                         species = "Sambar", species_index = 1),
@@ -824,9 +842,41 @@ density_summary <- bind_rows(
   density_summary_table(red_preds, multispecies_data, 
                         species = "Red", species_index = 3),
   density_summary_table(hog_preds, multispecies_data, 
-                        species = "Hog", species_index = 4))
+                        species = "Hog", species_index = 4)) %>%
+  mutate(Species = factor(Species, levels = c("Sambar", "Fallow", "Red", "Hog")))
+
 
 readr::write_csv(x = density_summary, file = "outputs/tables/site_group_estimates.csv")
+
+ggplot_site_summary <- list()
+
+for(x in c("Sambar", "Fallow", "Red", "Hog")) {
+
+ggplot_site_summary[[x]] <- ggplot(data = density_summary_long %>% filter(Species == x)) +
+  ggridges::geom_density_ridges2(aes(x = mean, 
+                                     y = Detection, 
+                                     fill = Detection, 
+                                     colour = Detection), 
+                                 alpha = 0.5, 
+                                 scale = 1, 
+                                 quantile_lines = TRUE, quantiles = 2) +
+  geom_label(aes(x = `Average Density`, y = Detection, 
+                 label = paste0("mean = ",`Average Density`, ", n = ", `Number of Sites`), nudge_y = -0.2), 
+             data = density_summary %>% filter(Species == x)) +
+  scale_fill_manual(values = delwp_pal(4)) +
+  scale_colour_manual(values = delwp_pal(4)) +
+  xlab("Average density at sites") +
+  scale_x_sqrt() +
+  ggtitle(paste(x, "deer")) +
+  # facet_wrap(~Species, scales = "free_x", ncol = 2) +
+  delwp_theme() +
+  theme(legend.position="none")
+
+ggsave(filename = paste0("outputs/plots/site_densities_", x, ".png"), 
+       plot = ggplot_site_summary[[x]], width = 2400, height = 1600, units = "px")
+
+}
+  
 
 density_summary %>%
   kbl(format = "html", digits = 2, caption = "Average (mean) density estimates at the various groups of sites (according to detections)") %>%
@@ -1278,6 +1328,8 @@ existing_dist[["Fallow"]] <- st_read("data/existing_distributions/Fallow_Deer_Di
 existing_dist[["Red"]] <- st_read("data/existing_distributions/Red_Deer_Distributions_Final_20201203", quiet = TRUE)
 existing_dist[["Hog"]] <- st_read("data/existing_distributions/Hog_Deer_Distribution_20160329", quiet = TRUE)
 
+
+
 crown_land <- readRDS("data/crown_land.rds") 
 
 # Get overlapping CA 
@@ -1292,6 +1344,58 @@ existing_ranges <- sapply(existing_dist_cl, st_area) %>%
   units::set_units("km2") %>%
   formatC(., digits = 0, format = "fg", big.mark = ",") %>% 
   as.character()
+
+gormley_dist_rat <- terra::rast("data/Gormley2011/CurrentDist.asc")
+gormleySambarOcc2 <- terra::rast("data/Gormley2011/SambarOcc2.asc")
+terra::crs(gormleySambarOcc2) <- terra::crs(combined_raster[[1]])
+values(gormleySambarOcc2) <- values(gormleySambarOcc2)/100
+# terra::crs(vic_preds_terra_th) <- terra::crs(processed_stack)
+terra::crs(gormley_dist_rat) <- terra::crs(combined_raster[[1]])
+values(gormley_dist_rat)[values(gormley_dist_rat) == 0] <- NA
+
+values(gormleySambarOcc2)[values(gormleySambarOcc2) >= 0.4] <- 1
+values(gormleySambarOcc2)[values(gormleySambarOcc2) < 0.4] <- NA
+levels(gormleySambarOcc2) <- data.frame(id = 1, values = "2011: Gormley et al (38,582 km^2^)")
+
+gormley_th_proj <- terra::project(gormleySambarOcc2, combined_raster[[1]])
+gormley_th_mask <- terra::mask(gormley_th_proj, combined_raster[[1]])
+
+gormley_dist_rat_proj <- terra::project(gormley_dist_rat, combined_raster[[1]])
+gormley_th_mask_kde <- terra::mask(gormley_th_mask, gormley_dist_rat_proj)
+
+sambar_sf_2020 <- existing_dist_cl[[1]] %>% 
+  sf::st_simplify(dTolerance = 250) %>%
+  sf::st_as_sf() %>%
+  mutate(value = "2020: Forsyth/ARI 2020 (43,779 km^2^)")
+
+joint_threshold_sambar <- joint_threshold[[1]]
+
+levels(joint_threshold_sambar)[[1]] <- data.frame(id = 0:3, 
+                                                  values = c(NA, 
+                                                             "2023: Our Study UCI (40,590 km^2^)",
+                                                             "2023: Our Study Median (38,582 km^2^)", 
+                                                             "2023: Our Study LCI (33,405 km^2^)"))
+
+crown_land_small <- crown_land %>% st_simplify(dTolerance = 250)
+
+sambar_change_plot <- ggplot() +
+  ggplot2::geom_sf(data = state, alpha = 1, linewidth = 0.5, fill = "grey98") + 
+  geom_sf(data = crown_land_small, alpha = 1, linewidth = 0, fill = "grey") +
+  geom_spatraster(data = gormley_th_mask_kde, na.rm = T) + 
+  geom_sf(data = sambar_sf_2020, aes(fill = value)) +
+  geom_spatraster(data = joint_threshold_sambar, na.rm = T) +
+  ggspatial::annotation_scale() +
+  ggplot2::scale_fill_manual(values = c(`2011: Gormley et al (38,582 km^2^)` = "#71C5E8", 
+                                        `2020: Forsyth/ARI 2020 (43,779 km^2^)` = "#E57200", 
+                                        `2023: Our Study UCI (40,590 km^2^)` = "#A5A1B5",
+                                        `2023: Our Study Median (38,582 km^2^)` = "#4C436B", 
+                                        `2023: Our Study LCI (33,405 km^2^)` = "#201547") ,
+                             na.value = "transparent",
+                            na.translate = F, name = "Study") +
+  delwp_theme() + 
+  theme(legend.text = ggtext::element_markdown())
+
+ggsave(plot = sambar_change_plot, filename = "outputs/plots/range_comparison_full.png", width = 4000, height = 2200, units = "px", bg = "white")
 
 names(existing_ranges) <- species_names
 existing_ranges
