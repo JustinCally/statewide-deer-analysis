@@ -1355,7 +1355,7 @@ values(gormley_dist_rat)[values(gormley_dist_rat) == 0] <- NA
 
 values(gormleySambarOcc2)[values(gormleySambarOcc2) >= 0.4] <- 1
 values(gormleySambarOcc2)[values(gormleySambarOcc2) < 0.4] <- NA
-levels(gormleySambarOcc2) <- data.frame(id = 1, values = "2011: Gormley et al (38,582 km^2^)")
+levels(gormleySambarOcc2) <- data.frame(id = 1, values = "2011: Gormley et al (32,644 km^2^)")
 
 gormley_th_proj <- terra::project(gormleySambarOcc2, combined_raster[[1]])
 gormley_th_mask <- terra::mask(gormley_th_proj, combined_raster[[1]])
@@ -1385,7 +1385,7 @@ sambar_change_plot <- ggplot() +
   geom_sf(data = sambar_sf_2020, aes(fill = value)) +
   geom_spatraster(data = joint_threshold_sambar, na.rm = T) +
   ggspatial::annotation_scale() +
-  ggplot2::scale_fill_manual(values = c(`2011: Gormley et al (38,582 km^2^)` = "#71C5E8", 
+  ggplot2::scale_fill_manual(values = c(`2011: Gormley et al (32,644 km^2^)` = "#71C5E8", 
                                         `2020: Forsyth/ARI 2020 (43,779 km^2^)` = "#E57200", 
                                         `2023: Our Study UCI (40,590 km^2^)` = "#A5A1B5",
                                         `2023: Our Study Median (38,582 km^2^)` = "#4C436B", 
