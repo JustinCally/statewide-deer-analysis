@@ -56,3 +56,12 @@ data/asot_operational_areas/asot_operational_areas.prj
 data/asot_operational_areas/asot_operational_areas.shp
 data/asot_operational_areas/asot_operational_areas.shx
 outputs/models/fit_multispecies_3_8.rds
+data/all_tree_crown.rds
+data/TREE_DENSITY/.DS_Store
+data/TREE_DENSITY/TREE_DENSITY.cpg
+data/TREE_DENSITY/TREE_DENSITY.dbf
+data/TREE_DENSITY/TREE_DENSITY.prj
+data/TREE_DENSITY/TREE_DENSITY.shp
+data/TREE_DENSITY/TREE_DENSITY.shx
+data/TREE_DENSITY/tree_density_column_names.txt
+outputs/models/fit_multispecies_all_pred_3.rds
