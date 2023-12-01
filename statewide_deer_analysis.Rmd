@@ -174,7 +174,8 @@ Using the `prepare_model_data()` function we generate the data for the `STAN` mo
 ```{r ModelData}
 if(!file.exists("data/multispecies_data.rds")) {
   
-crown_land <- readRDS("data/crown_land.rds")
+# crown_land <- readRDS("data/crown_land.rds")
+  crown_land <- readRDS("data/all_tree_crown.rds")
   
 multispecies_data <- prepare_model_data_multispecies(species = deer_species_all,
                                  projects = project_short_name,
@@ -434,7 +435,7 @@ for(i in 1:nrow(models_to_run)) {
                                  iter_sampling = ni, 
                                  iter_warmup = nw)
 
-  model_fits[[i]]$save_object(paste0("outputs/models/fit_multispecies_", 
+  model_fits[[i]]$save_object(paste0("outputs/models/fit_multispecies_all_pred_", 
                                      i,".rds"))
 
   

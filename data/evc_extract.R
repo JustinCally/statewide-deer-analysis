@@ -31,6 +31,7 @@ evc_data_filtered <- evc_data_all %>%
   arrange(BIOEVC) %>%
   mutate(BIOEVCLVL = as.integer(as.factor(BIOEVC)))
 
+prediction_raster <- "data/prediction_raster/statewide_raster.tif"
 pred_raster_full <- terra::rast(prediction_raster)
 
 pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(

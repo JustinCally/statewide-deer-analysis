@@ -59,6 +59,24 @@ crown_land <- plm_c %>% st_union()
 
 saveRDS(crown_land, "data/crown_land.rds", compress = "xz")
 
+#### Add in trees on private land ####
+all_tree_area <- sf::st_read("data/TREE_DENSITY")
+
+# saveRDS(all_tree_area, "data/all_tree_area.rds")
+
+# all_tree_c <- sf::st_combine(all_tree_area)
+
+all_tree_crown <- st_combine(bind_rows(all_tree_area %>% st_transform(3111), st_as_sf(crown_land)))
+
+saveRDS(all_tree_crown, "data/all_tree_crown.rds")
+
+# filter out islands
+all_tree_crown <- readRDS("data/all_tree_crown.rds")
+
+library(rmapshaper)
+
+filtered_islands <- ms_filter_islands(all_tree_crown, min_area = 50000, sys = TRUE, sys_mem = 28)
+
 # Read in resolved rasters
 processed_tifs <- list.files(raster_files, full.names = TRUE)[stringr::str_detect(list.files(raster_files), ".tif$")]
 
@@ -68,8 +86,8 @@ processed_stack <- terra::rast(processed_tifs)
 projected_sw <- project(processed_stack, rast(prediction_raster))
 
 # crop to public land
-cropped_prediction <- mask(projected_sw,
-                           vect(crown_land),
-                           touches=TRUE)
+cropped_prediction <- terra::mask(projected_sw,
+                                  vect(as_Spatial(all_tree_crown)),
+                                  touches=TRUE)
 
 writeRaster(cropped_prediction, "data/prediction_raster/statewide_raster.tif", overwrite=T)
