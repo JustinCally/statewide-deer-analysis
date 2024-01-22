@@ -1245,7 +1245,7 @@ combined_threshold[[i]] <- c(threshold_rast, threshold_rast_lci, threshold_rast_
 
 joint_threshold[[i]] <- app(combined_threshold[[i]], sum, na.rm = T)
 
-d <- data.frame(id = 0:3, values = c(NA_character_, "UCI", "Median", "LCI"))
+d <- data.frame(id = 0:3, values = c(NA_character_, "Largest estimated range (95th percentile)", "Average estimated range (50th percentile)", "Smallest estimated range (5th percentile)"))
 
 levels(joint_threshold[[i]]) <- d
 
@@ -1288,7 +1288,7 @@ plot_threshold <- function(raster, state, crop = NULL) {
     ggplot2::scale_alpha_manual(values = c(0.25, 0.65, 0.85), 
                                 na.value = "transparent", 
                                 na.translate = F) +
-    ggplot2::labs(alpha = "Distribution \nrange", fill = "Distribution \nrange") +
+    ggplot2::labs(alpha = "Distribution range", fill = "Distribution range") +
     ggspatial::annotation_scale() +
     delwp_theme()
   

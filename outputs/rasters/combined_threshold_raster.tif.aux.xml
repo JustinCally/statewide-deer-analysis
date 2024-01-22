@@ -3,9 +3,9 @@
     <Description>Sambar Deer</Description>
     <CategoryNames>
       <Category>____NA_+</Category>
-      <Category>UCI</Category>
-      <Category>Median</Category>
-      <Category>LCI</Category>
+      <Category>Largest estimated range (95th percentile)</Category>
+      <Category>Average estimated range (50th percentile)</Category>
+      <Category>Smallest estimated range (5th percentile)</Category>
       <Category></Category>
       <Category></Category>
       <Category></Category>
@@ -264,9 +264,9 @@
     <Description>Fallow Deer</Description>
     <CategoryNames>
       <Category>____NA_+</Category>
-      <Category>UCI</Category>
-      <Category>Median</Category>
-      <Category>LCI</Category>
+      <Category>Largest estimated range (95th percentile)</Category>
+      <Category>Average estimated range (50th percentile)</Category>
+      <Category>Smallest estimated range (5th percentile)</Category>
       <Category></Category>
       <Category></Category>
       <Category></Category>
@@ -525,9 +525,9 @@
     <Description>Red Deer</Description>
     <CategoryNames>
       <Category>____NA_+</Category>
-      <Category>UCI</Category>
-      <Category>Median</Category>
-      <Category>LCI</Category>
+      <Category>Largest estimated range (95th percentile)</Category>
+      <Category>Average estimated range (50th percentile)</Category>
+      <Category>Smallest estimated range (5th percentile)</Category>
       <Category></Category>
       <Category></Category>
       <Category></Category>
@@ -786,9 +786,9 @@
     <Description>Hog Deer</Description>
     <CategoryNames>
       <Category>____NA_+</Category>
-      <Category>UCI</Category>
-      <Category>Median</Category>
-      <Category>LCI</Category>
+      <Category>Largest estimated range (95th percentile)</Category>
+      <Category>Average estimated range (50th percentile)</Category>
+      <Category>Smallest estimated range (5th percentile)</Category>
       <Category></Category>
       <Category></Category>
       <Category></Category>
