@@ -364,7 +364,7 @@ prepare_model_data_multispecies <- function(species,
 
     presence_absence_ic <-  dplyr::tbl(con,
                                        dbplyr::in_schema("camtrap", "processed_site_substation_presence_absence")) %>%
-      dplyr::filter(scientific_name %in% species & ProjectShortName %in% !!projects) %>%
+      dplyr::filter(scientific_name %in% !!species & ProjectShortName %in% !!projects) %>%
       dplyr::group_by(Species = scientific_name, SiteID, Presence) %>%
       dplyr::summarise(Survey = "Camera", Count = Presence) %>%
       dplyr::collect()

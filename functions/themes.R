@@ -68,4 +68,3 @@ delwp_palettes = function(name, n, all_palettes = list(delwp_cols), type = c("di
   structure(out, name = name, class = "palette")
 }
 
-"#F5F8CC"
