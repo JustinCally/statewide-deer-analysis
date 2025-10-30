@@ -81,6 +81,7 @@ library(brms)
 library(Distance)
 library(ggrepel)
 library(pROC)
+library(gptoolsStan)
 options(brms.backend = "cmdstanr")
 check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
 register_knitr_engine(override = FALSE)
@@ -171,6 +172,7 @@ Using the `prepare_model_data()` function we generate the data for the `STAN` mo
 4. Generate model matrix of the various sub-models (distance-sampling, abundance and transect) 5. Generate data for the prediction process 6. Generate data for the random effect (bioregion)\
 7. Generate data for regional predictions (indexing based on DEECA regions)
 
+
 ```{r ModelData}
 if(!file.exists("data/multispecies_data.rds")) {
   
@@ -199,10 +201,62 @@ evc_groups <- readRDS("data/evc_groupnames.rds")
 
 multispecies_data <- c(multispecies_data, evc_groups)
 
+#### gp data ####
+
 saveRDS(multispecies_data, "data/multispecies_data.rds")
 } else {
   multispecies_data <- readRDS("data/multispecies_data.rds")
 }
+```
+
+```{r gpdata}
+### any_seen count 
+any_seen <- multispecies_data$any_seen[1,] # select first for a filler
+# aggregate raster to make GP easier/faster
+pred_raster_full <- terra::rast(prediction_raster)
+
+pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
+  stringr::str_remove_all(labels(terms(ab_formula_1)),
+                          "scale[(]|[)]|log[(]|sqrt[(]"), 
+  pattern = "[*]", negate = T)]], mean)
+
+prediction_points <- as.data.frame(pred_raster, xy = T, cell = T) %>%
+  sf::st_as_sf(coords = c("x", "y"), crs = 3111)
+
+any_seen_rastagg <- aggregate(pred_raster, 25)
+# Pad the raster to minimise edge effects
+any_seen_rast <- landscapemetrics::pad_raster(any_seen_rastagg, 
+                                              pad_raster_value = -1, 
+                                              pad_raster_cells = 5)[[1]] %>% rast()
+# which cells are sampled 
+sampled_cells <- cells(any_seen_rast, vect(cams_curated %>% st_transform(3111)))[,"cell"]
+sampled_cells_u <- data.frame(cell = sampled_cells, any_seen = any_seen) %>%
+  group_by(cell) %>%
+  summarise(any_seen = max(any_seen, na.rm = T)) %>%
+  ungroup()
+# sampled cells rows and columns 
+sampled_cells_rowcol <- rowColFromCell(any_seen_rast, sampled_cells)
+
+# prediction cells rows and columns
+prediction_cells <- cells(any_seen_rast, vect(prediction_points))[,"cell"] 
+prediction_cells_rowcol <- rowColFromCell(any_seen_rast, prediction_cells)
+
+# mask unsampled data
+values(any_seen_rast) <- -1
+values(any_seen_rast)[cells(any_seen_rast) %in% sampled_cells_u$cell] <- sampled_cells_u$any_seen
+
+any_seen_matrix <- as.matrix(any_seen_rast, wide = TRUE)
+
+# create stan data list
+gp_data <- list(num_rows = nrow(any_seen_matrix), 
+                num_cols = ncol(any_seen_matrix), 
+                sampled_row = sampled_cells_rowcol[,1], 
+                sampled_col = sampled_cells_rowcol[,2], 
+                prediction_row = prediction_cells_rowcol[,1], 
+                prediction_col = prediction_cells_rowcol[,2])
+
+# combine 
+multispecies_gp_data <- c(multispecies_data, gp_data)
 ```
 
 ### Note on assigning species to deer sign detections  
@@ -245,8 +299,26 @@ The second model uses the combination of bioregion and EVC as random-effects on 
 
 ```{r models, echo = FALSE, warning=FALSE, include=FALSE}
 model_negbin_ms_co <- cmdstan_model(here::here("stan", "count_only_negbin_ms.stan"))
-model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"))
+model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"), 
+                            include_paths=gptools_include_path())
 model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
+
+# update NINB model: 
+model_zinb <- cmdstan_model(here::here("stan", "count_det_nondet_zinb_ms.stan"), 
+                            include_paths=gptools_include_path())
+
+model_zip <- cmdstan_model(here::here("stan", "count_det_nondet_zip_ms_nogp.stan"), 
+                            include_paths=gptools_include_path())
+
+model_poisson_ms <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_ms.stan"), 
+                            include_paths=gptools_include_path())
+
+model_poisson_ms_bioreg <- cmdstan_model(here::here("stan", "count_det_nondet_poisson_bioreg_ms.stan"), 
+                            include_paths=gptools_include_path())
+
+model_negbin_ms_bioreg <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_bioreg.stan"), 
+                            include_paths=gptools_include_path())
+
 ```
 
 ## Fit models
@@ -361,7 +433,17 @@ snapshot_interval <- 2
             formula = ~HerbaceousUnderstoryCover,
           convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
   
-  kableExtra::kbl(summarize_ds_models(hn0, hr0, hn1, hr1, output = "latex") %>% 
+  hn2 <- ds(ds_data, transect = "point", key="hn", adjustment = "cos", order = 2,
+          convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
+  
+  hn3 <- ds(ds_data, transect = "point", key="hn", adjustment = "cos", order = 2,
+            formula = ~HerbaceousUnderstoryCover,
+          convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
+  
+  hr2 <- ds(ds_data, transect = "point", key="hr", adjustment = "cos", order = 2,
+          convert_units = conversion, cutpoints = mybreaks, truncation = trunc.list)
+  
+  kableExtra::kbl(summarize_ds_models(hn0, hr0, hn1, hr1, hn2, hr2, hn3, output = "latex") %>% 
                     mutate(Model = stringr::str_extract(Model, pattern = '(?<=\\{)[^\\}]+')), 
                   digits=3,
              caption="Model selection table for deer detection", format = "html") %>%
@@ -395,6 +477,50 @@ We can fit models using the `cmdstanr` R package [@cmdstanr]. Here we fit models
 -   Model with several key abundance covariates and hazard-rate detection function and bioregion + EVC random effect
 
 To avoid re-running models this chunk is not evaluated by default and the models are saved as rds objects
+
+```{r gpmodel, eval = FALSE}
+# Run the models and assign them to an element in a list matching the rows for the 'models_to_run' data.frame
+  
+  form_to_use <- ab_formula_3
+  
+  params_to_use <- c(TRUE, labels(terms(ab_formula_1)) %in% labels(terms(form_to_use)))
+  
+  data_to_use <- multispecies_gp_data
+  
+  data_to_use$X_psi <- as.matrix(data_to_use$X_psi[,params_to_use])
+  data_to_use$X_pred_psi <- as.matrix(data_to_use$X_pred_psi[,params_to_use])
+  data_to_use$m_psi <- sum(params_to_use)
+  
+  data_to_use$keyfun <- 1
+
+  model_gp_fit <- model_zip$sample(data = data_to_use,
+                                         chains = nc,
+                                 parallel_chains = nc, 
+                                 init = 0.1, 
+                                 max_treedepth = 10, 
+                                 adapt_delta = 0.95,
+                                 refresh = 25, 
+                                 show_messages = TRUE,
+                                 show_exceptions = FALSE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = 150, 
+                                 iter_warmup = 150)
+
+
+
+gc()
+model_gp_fit$draws()
+try(model_gp_fit$sampler_diagnostics(), silent = TRUE) # Load sampler diagnostics.
+try(model_gp_fit$init(), silent = TRUE) # Load user-defined initial values.
+try(model_gp_fit$profiles(), silent = TRUE) # Load profiling samples.
+
+# Save the object to a file.
+qs2::qs_save(object = model_gp_fit, 
+             file = "outputs/models/model_gp_fit.qs") 
+
+gc()
+```
+
 
 ```{r FitModels, eval = FALSE}
 # Run the models and assign them to an element in a list matching the rows for the 'models_to_run' data.frame
@@ -519,7 +645,9 @@ Note that model exploration and tuning was much more extensive than presented he
 
 ```{r AssignTopModel}
 # assign index for top model
-top <- 3
+top <- 1
+
+model_fits <- list(model_gp_fit)
 ```
 
 ## Posterior predictive checks
@@ -640,7 +768,6 @@ convergence_params <- model_fits[[top]]$draws(c("beta_det",
                                                 "beta_psi",
                                                 "bioregion_sd", 
                                                 "beta_trans_det", 
-                                                "odRN", 
                                                 "od_mu"))
 
 mcmc_trace(convergence_params, facet_args = list(ncol = 4)) + 

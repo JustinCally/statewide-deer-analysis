@@ -107,14 +107,6 @@ data {
 
   // key function, 0 = halfnorm
   int keyfun;
-  // GP Data
-  // Number of rows and columns of the frequency map and the padded number of rows and columns. We
-  // pad to overcome the periodic boundary conditions inherent in fast Fourier transform methods.
-  int num_rows, num_cols; // dimensions of the raster based on the size of Vicoria and the resolution of the raster for GP (e.g. 10km)
-  array[n_site] int<lower=0, upper=num_rows> sampled_row; // location of site
-  array[n_site] int<lower=0, upper=num_cols> sampled_col; // location of site
-  array[npc] int<lower=0, upper=num_rows> prediction_row; // location of prediction grid
-  array[npc] int<lower=0, upper=num_cols> prediction_col; // location of prediction grid
 }
 
 transformed data {
@@ -149,11 +141,6 @@ parameters {
   array[S] vector[n_gs] zeta;
   array[S] matrix[n_site, n_gs] eps_raw;
   array[S] real<lower=0> grp_sd;
-  // od
-  array[S] real od_mu;
-  array[S] matrix[num_rows, num_cols] z_std;
-  array[S] real<lower=0> gp_sigma;
-  array[S] real log_length_scale;
 }
 
 transformed parameters {
@@ -182,28 +169,14 @@ transformed parameters {
   array[S, n_site] vector[n_gs] epsi;
   array[S] matrix[n_site, n_gs] eps_site;
   real<lower=0> theta = exp(log_theta);
-  array[S] real od; // bioregion random effect
   array[S, n_site] real<lower=0, upper=1> pbar;
-  array[S] real<lower=0> length_scale = exp(log_length_scale);
-  array[S] matrix[num_rows, num_cols %/% 2 + 1] rfft2_cov;
-  array[S] matrix[num_rows, num_cols] f;
-  array[S] vector[n_site] f_site;
 
-  for (s in 1:S) {
-    rfft2_cov[s] = gp_periodic_matern_cov_rfft2(
-      1.5, num_rows, num_cols, gp_sigma[s],
-      [length_scale[s], length_scale[s]]', [num_rows, num_cols]') + 1e-6;
-    f[s] = gp_inv_rfft2(z_std[s], rep_matrix(beta_occ[s], num_rows, num_cols), rfft2_cov[s]);
-    for (n in 1:n_site) {
-      f_site[s, n] = f[s, sampled_row[n], sampled_col[n]];
-    }
-  }
+
 
   for(s in 1:S) {
     for(b in 1:np_bioreg) {
     eps_bioregion[s,b] = bioregion_sd[s] * bioregion_raw[s,b];
   }
-  od[s] = exp(od_mu[s]);
   }
 
 
@@ -227,8 +200,8 @@ for(n in 1:n_site) {
   vector[n_max[n,s]+1] Nlik;
   vector[n_max[n,s]+1] gN;
   vector[n_max[n,s]+1] pcond;
-  log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s] + f_site[s, n] + eps_bioregion[s,site_bioreg[n]];
-  log_lambda_psi_rn[s,n] = X_psi[n,] * append_row(beta_int_rn[s] , beta_psi[s, 2:m_psi]) + f_site[s, n] + eps_bioregion[s,site_bioreg[n]];
+  log_lambda_psi[s,n] = X_psi[n,] * beta_psi[s] + eps_bioregion[s,site_bioreg[n]];
+  log_lambda_psi_rn[s,n] = X_psi[n,] * append_row(beta_int_rn[s] , beta_psi[s, 2:m_psi]) + eps_bioregion[s,site_bioreg[n]];
 
   for(j in 1:n_gs) {
     eps_site[s, n,j] = grp_sd[s] * eps_raw[s,n,j];
@@ -239,7 +212,7 @@ for(n in 1:n_site) {
   // p-bar
 
   for(k in 1:(n_max[n,s]+1))
-    Nlik[k] = exp(neg_binomial_2_log_lpmf(k-1 | log_lambda_psi[s,n], od[s]));
+    Nlik[k] = exp(poisson_log_lpmf(k-1 | log_lambda_psi[s,n]));
 
   gN = Nlik/sum(Nlik);
 
@@ -266,12 +239,12 @@ for(n in 1:n_site) {
 if (n_survey[n] > 0) {
   vector[n_max[n,s]] lp;
     if(any_seen[s,n] == 0){ // not seen
-      lp[1] = log_sum_exp(neg_binomial_2_log_lpmf(0 | log_lambda_psi_rn[s,n], od[s]), neg_binomial_2_log_lpmf(1 | log_lambda_psi_rn[s,n], od[s]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]));
+      lp[1] = log_sum_exp(poisson_log_lpmf(0 | log_lambda_psi_rn[s,n]), poisson_log_lpmf(1 | log_lambda_psi_rn[s,n]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]));
     } else {
-      lp[1] = neg_binomial_2_log_lpmf(1 | log_lambda_psi_rn[s,n], od[s]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
+      lp[1] = poisson_log_lpmf(1 | log_lambda_psi_rn[s,n]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | r[start_idx[n]:end_idx[n]]);
     }
     for (k in 2:n_max[n,s]){
-      lp[k] = neg_binomial_2_log_lpmf(k | log_lambda_psi_rn[s,n], od[s]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | 1-(1-r[start_idx[n]:end_idx[n]])^k);
+      lp[k] = poisson_log_lpmf(k | log_lambda_psi_rn[s,n]) + bernoulli_lpmf(y2[s,start_idx[n]:end_idx[n]] | 1-(1-r[start_idx[n]:end_idx[n]])^k);
     }
     lp_site[s,n] = log_sum_exp(lp);
     } else {
@@ -290,11 +263,6 @@ model {
     to_vector(eps_raw[s,,]) ~ std_normal();
     grp_sd[s] ~ normal(0, 1);
     zeta[s,] ~ normal(0, 2);
-    // od
-    od_mu[s] ~ normal(5,1);
-    to_vector(z_std[s]) ~ std_normal();
-    gp_sigma[s] ~ normal(0, 1);
-    log_length_scale[s] ~  normal(log(1), 0.5);
   }
   beta_trans_det ~ normal(0, 2); // beta for transect detection
   beta_det ~ normal(0, 4); // prior for sigma
@@ -304,7 +272,7 @@ model {
   for(n in 1:n_site) {
   for(j in 1:n_gs) {
   for(s in 1:S) {
-  target += neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s]);
+  target += poisson_lpmf(n_obs[n,j,s] | lambda[s,n,j]);
         }
   y[n,,j] ~ multinomial_logit(to_vector(log_p_raw[n,,j]));
   }
@@ -350,9 +318,9 @@ for(n in 1:n_site) {
   for(j in 1:n_gs) {
   log_lik1[n,j] = multinomial_logit_lpmf(y[n,,j] | to_vector(log_p_raw[n,,j])); //for loo
   for(s in 1:S) {
-  log_lik2[s,n,j] = neg_binomial_2_lpmf(n_obs[n,j,s] | lambda[s,n,j], od[s]); //for loo
-  n_obs_true[s, n, j] = gs[j] * (neg_binomial_2_log_rng(log_lambda_psi[s,n] + log(eps_ngs[s,n,j]), od[s]));
-  n_obs_pred[s, n,j] = gs[j] * neg_binomial_2_rng(lambda[s,n,j], od[s]);
+  log_lik2[s,n,j] = poisson_lpmf(n_obs[n,j,s] | lambda[s,n,j]); //for loo
+  n_obs_true[s, n, j] = gs[j] * (poisson_log_rng(log_lambda_psi[s,n] + log(eps_ngs[s,n,j])));
+  n_obs_pred[s, n,j] = gs[j] * poisson_rng(lambda[s,n,j]);
   }
   log_lik2_site[n, j] = log_sum_exp(log_lik2[,n,j]);
     }
@@ -384,7 +352,7 @@ for(i in 1:np_reg) Nhat_reg[s,i] = 0;
 for(i in 1:np_bioreg) Nhat_bioreg[s,i] = 0;
 
 for(i in 1:npc) {
-  pred[s,i] = neg_binomial_2_log_rng(X_pred_psi[i,] * beta_psi[s] + f[s, prediction_row[i], prediction_col[i]] + eps_bioregion[s, pred_bioreg[i]], od[s]) * prop_pred[i] * av_gs[s]; //offset
+  pred[s,i] = poisson_log_rng(X_pred_psi[i,] * beta_psi[s] + eps_bioregion[s, pred_bioreg[i]]) * prop_pred[i] * av_gs[s]; //offset
   if(pred[s,i] > max(N_site[s,])) {
     trunc_counter[s] += 1;
   }
