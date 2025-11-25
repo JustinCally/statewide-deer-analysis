@@ -75,7 +75,7 @@ library(terra)
 library(caret)
 library(tidyterra)
 library(tidyr)
-library(VicmapR)
+library(vicspatial)
 library(kableExtra)
 library(brms)
 library(Distance)
@@ -400,7 +400,8 @@ To avoid re-running models this chunk is not evaluated by default and the models
 # Run the models and assign them to an element in a list matching the rows for the 'models_to_run' data.frame
 model_fits <- list()
 
-for(i in 1:nrow(models_to_run)) {
+# for(i in 1:nrow(models_to_run)) {
+  for(i in 3) {
   
   # for each iteration run a different model
 
@@ -969,13 +970,13 @@ writeRaster(combined_sd_raster, "outputs/rasters/combined_deer_sd.tif", overwrit
 ```
 
 ```{r PlotSave, fig.height=24, fig.width=8, fig.cap="Abundance of Sambar, Fallow, Red and Hog Deer across Victoria, dark-grey area reflects area not included in predictions (i.e. not public land)"}
-# reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
-#     VicmapR::collect() %>%
+# reg <- vicspatial::vicmap_query("open-data-platform:delwp_region") %>%
+#     vicspatial::collect() %>%
 #   sf::st_transform(3111) %>%
 #   sf::st_simplify(dTolerance = 250) 
-state <- VicmapR::vicmap_query("open-data-platform:vmlite_victoria_polygon_su5") %>%
+state <- vicspatial::vicmap_query("open-data-platform:vmlite_victoria_polygon_su5") %>%
   filter(state != "NSW" & state != "SA" & feature_type_code != "sea") %>%
-  VicmapR::collect() %>%
+  vicspatial::collect() %>%
   sf::st_transform(3111)
 
 gippsland <- vic_regions %>% filter(delwp_region == "GIPPSLAND")
@@ -1051,8 +1052,8 @@ format_nhat <- function(sp, data = Nhat_sum) {
         "]")
 }
 
-reg <- VicmapR::vicmap_query("open-data-platform:delwp_region") %>%
-    VicmapR::collect() %>%
+reg <- vicspatial::vicmap_query("open-data-platform:delwp_region") %>%
+    vicspatial::collect() %>%
     dplyr::group_by(delwp_region) %>%
     dplyr::summarise(geometry = sf::st_combine(geometry)) %>%
     dplyr::ungroup() %>%
@@ -1920,8 +1921,8 @@ Bioregion usually had a substantial impact on abundance estimates across the sta
 # Bioregion map 
 bioregion_eff <- model_fits[[top]]$summary("eps_bioregion", posterior::default_summary_measures())
 
-bioreg <- VicmapR::vicmap_query("open-data-platform:vbioreg100") %>%
-    VicmapR::collect() %>%
+bioreg <- vicspatial::vicmap_query("open-data-platform:vbioreg100") %>%
+    vicspatial::collect() %>%
   group_by(bioregion, bioregion_code) %>%
   summarise(geometry = st_union(geometry)) %>%
   ungroup() %>%
