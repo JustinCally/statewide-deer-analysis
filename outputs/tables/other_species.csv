@@ -2,27 +2,27 @@
 "Black-tailed Wallaby",214
 "Eastern Grey Kangaroo",129
 "Sambar Deer",104
+"Red Fox",92
 "Bare-nosed Wombat",91
-"Red Fox",90
 "Common Brush-tailed Possum",80
 "Emu",46
-"Dingo",38
 "Superb Lyrebird",38
 "Pied Currawong",36
 "Laughing Kookaburra",35
 "Short-beaked Echidna",32
+"Dingo",30
 "Domestic Cat (feral)",30
 "Fallow Deer",30
 "Red-necked Wallaby",25
 "Ravens and Crows",24
 "Hog Deer",22
 "Grey Currawong",19
+"Southern Long-nosed Bandicoot",19
 "Australian Magpie",18
-"Southern Long-nosed Bandicoot",17
 "Western Grey Kangaroo",17
-"Long-footed Potoroo",16
 "Rabbits and Hares",16
 "European Rabbit",15
+"Long-footed Potoroo",14
 "Red Deer",12
 "Red Wattlebird",11
 "Eastern Ring-tailed Possum",9
@@ -37,6 +37,7 @@
 "Bassian Thrush",3
 "Bush Rat",3
 "Common Blackbird",3
+"Dingo & Dog (feral)",3
 "Horse (feral)",3
 "Leadbeater's Possum",3
 "Magpie-lark",3
@@ -47,7 +48,6 @@
 "Black Rat",2
 "Eastern Whipbird",2
 "Flame Robin",2
-"Long-nosed Potoroo",2
 "Pig (feral)",2
 "White-browed Scrubwren",2
 "White-eared Honeyeater",2
@@ -60,7 +60,6 @@
 "Brushtail Possums",1
 "Cattle (feral)",1
 "Chestnut Teal",1
-"Dingo & Dog (feral)",1
 "Eastern Rosella",1
 "Eastern Yellow Robin",1
 "Galah",1

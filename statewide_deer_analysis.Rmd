@@ -378,13 +378,9 @@ Below we list the models we are implementing, all have a hazard detection functi
 models_to_run <- data.frame(formula = c("ab_formula_1", 
                                         "ab_formula_2",
                                         "ab_formula_3",
-                                        "ab_formula_4",
-                                        "ab_formula_3", 
-                                        "ab_formula_4",
-                                        "ab_formula_1",
-                                        "ab_formula_2"), 
-                            keyfun = c(1,1,1,1,1,1,1,1), 
-                            evc = c(F,F,F,F,T,T,T,T))
+                                        "ab_formula_4"), 
+                            keyfun = c(1,1,1,1), 
+                            evc = c(F,F,F,F))
 ```
 
 ### Full Models
@@ -400,8 +396,8 @@ To avoid re-running models this chunk is not evaluated by default and the models
 # Run the models and assign them to an element in a list matching the rows for the 'models_to_run' data.frame
 model_fits <- list()
 
-# for(i in 1:nrow(models_to_run)) {
-  for(i in 3) {
+for(i in 1:nrow(models_to_run)) {
+  # for(i in 3) {
   
   # for each iteration run a different model
 
