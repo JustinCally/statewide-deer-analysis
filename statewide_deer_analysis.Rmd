@@ -355,6 +355,7 @@ coverage <- ifel(coverage == 0, NA, coverage)
 
 # mask all 64 layers in one go
 alphaearth_rast_proj_masked <- mask(alphaearth_rast_proj, coverage)
+writeRaster(alphaearth_rast_proj_masked, "data/alphaearth/alphaearth_rast_proj_masked.tif")
 alphaearth_rast_proj_masked_df <- as.data.frame(alphaearth_rast_proj_masked) %>% as.matrix()
 
 coverage_synced <- mask(coverage, alphaearth_rast_proj[[1]])
@@ -1626,12 +1627,15 @@ Within our model we calculate abundance/density for deer in each of the `r forma
 Using the model predictions (`pred`) for all suitable public land we generate a raster (1km^2^ resolution). We save the average spatial estimates under `outputs/rasters` (`.tif` files) and also provide binned plots (png files) in `outputs/plots`.
 
 ```{r PredictionRasters}
-pred_raster_full <- terra::rast(prediction_raster)
+# pred_raster_full <- terra::rast(prediction_raster)
+# 
+# pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
+#   stringr::str_remove_all(labels(terms(ab_formula_1)),
+#                           "scale[(]|[)]|log[(]|sqrt[(]"), 
+#   pattern = "[*]", negate = T)]], mean)
 
-pred_raster <- terra::app(pred_raster_full[[stringr::str_subset(
-  stringr::str_remove_all(labels(terms(ab_formula_1)),
-                          "scale[(]|[)]|log[(]|sqrt[(]"), 
-  pattern = "[*]", negate = T)]], mean)
+pred_raster <- rast("data/alphaearth/alphaearth_rast_proj_masked.tif")[[1]]
+
 
 mean_raster <- list()
 sd_raster <- list()
@@ -1729,7 +1733,7 @@ plot_abundance <- function(raster, state, species, crop = NULL) {
     ggplot2::scale_fill_manual(values = delwp_pal(lvls), na.value = "transparent", na.translate = F) +
     ggplot2::labs(fill = bquote('Deer per'~km^2)) + 
     ggspatial::annotation_scale() +
-    ggplot2::geom_sf(data = state, alpha = 1, linewidth = 0.5, fill = "grey90") + 
+    ggplot2::geom_sf(data = state, alpha = 0.1, linewidth = 0.5, fill = "grey90") + 
     delwp_theme()
   
   return(plot)
