@@ -67,3 +67,5 @@ data/TREE_DENSITY/tree_density_column_names.txt
 outputs/models/fit_multispecies_all_pred_3.rds
 outputs/models/model_gp_fit_negbin.qs
 outputs/models/model_gp_fit.qs
+*.qs
+satemb_vic_reexport.tif

@@ -75,21 +75,22 @@ library(terra)
 library(caret)
 library(tidyterra)
 library(tidyr)
-library(VicmapR)
+library(vicspatial)
 library(kableExtra)
 library(brms)
 library(Distance)
 library(ggrepel)
 library(pROC)
 library(gptoolsStan)
+library(weda)
 options(brms.backend = "cmdstanr")
 check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
 register_knitr_engine(override = FALSE)
 options(mc.cores=8)
 
 #### Database connection ####
-con <- weda::weda_connect(password = keyring::key_get(service = "ari-dev-weda-psql-01",
-                                                username = "psql_user"), username = "psql_user")
+con <- weda_connect(password = keyring::key_get(service = "ari-dev-weda-psql-01",
+                                                username = "psql_user"))
 ```
 
 # Custom Functions
@@ -259,6 +260,340 @@ gp_data <- list(num_rows = nrow(any_seen_matrix),
 multispecies_gp_data <- c(multispecies_data, gp_data)
 ```
 
+```{r alphaearthmodel, eval = FALSE}
+library(rgee)
+
+# note you have to authenticate and setup google earth api
+# ee_install_upgrade()
+ee_Authenticate() # only need to do once
+ee_Initialize()
+
+# Slightly larger AOI for robustness
+vic_poly <- vicspatial::vicmap_query("open-data-platform:vmlite_victoria_polygon_su5") %>%
+    filter(state != "NSW" & state != "SA" & feature_type_code != "sea") %>%
+    vicspatial::collect() %>%
+    sf::st_transform(4326) %>% 
+  st_combine() %>% st_as_sf() %>% 
+  rename(geometry = x)
+
+ee_vic_geom <- sf_as_ee(vic_poly)$geometry()
+
+# Load AlphaEarth 2023 image
+emb <- ee$ImageCollection("GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL")$
+  filterDate("2021-07-01", "2023-06-30")$
+  filterBounds(ee_vic_geom)$
+  mosaic()$
+  clip(ee_vic_geom)
+
+# Re-export at safer resolution
+alphaearth_rast <- ee_as_rast(
+  image = emb,
+  region = ee_vic_geom,
+  scale = 1000,                     # safer for Drive export
+  via = "drive",
+  dsn = "statevic_deer"
+)
+
+alphaearth_rast_proj <- project(alphaearth_rast, pred_raster_full)
+
+# 1km2 grid
+writeRaster(alphaearth_rast_proj, "data/alphaearth/alphaearth_rast_proj.tif")
+
+# just extract points
+
+pts_sf <- cams_curated %>% 
+  select(geometry) %>%
+  st_transform(4326)
+
+# 2) AlphaEarth (annual 2023) as an ee$Image
+emb_all <- ee$ImageCollection("GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL")$
+  filterDate("2021-07-01", "2023-06-30")$
+  mosaic()
+
+# 3) Sample values at the points
+ee_pts <- sf_as_ee(pts_sf)
+samples_fc <- emb_all$sampleRegions(
+  collection = ee_pts,
+  scale = 10,           # match the resolution you want
+  geometries = TRUE     # keep geometry so coords come back
+)
+
+# 4) Bring results back to R (data frame with one row per point, columns A00..A63)
+# For a handful of points, "getInfo" is fine; for lots of points use via="drive"
+vals_sf <- ee_as_sf(samples_fc, via = "getInfo")
+
+# 5) If you want a plain data.frame with lon/lat columns:
+alphaearth_vals_df <- vals_sf |>
+  mutate(
+    lon = sf::st_coordinates(geometry)[,1],
+    lat = sf::st_coordinates(geometry)[,2]
+  )  %>% 
+  select(-lon,-lat)
+
+saveRDS(alphaearth_vals_df, "data/alphaearth/alphaearth_vals_df.rds")
+```
+
+```{r alphaearthdata, eval=F}
+library(sf)
+library(terra)
+library(exactextractr)
+
+alphaearth_rast_proj <- rast("data/alphaearth/alphaearth_rast_proj.tif")
+alphaearth_vals_df <- readRDS("data/alphaearth/alphaearth_vals_df.rds")
+vals_sf <- alphaearth_vals_df %>% 
+  st_as_sf(., coords = c("lon", "lat"), crs = 4326)
+
+# crown land to raster CRS (fast + safe)
+crown_land_3111 <- readRDS("data/crown_land.rds") |> st_transform(crs(alphaearth_rast_proj, proj=TRUE))
+
+# compute fractional coverage ONCE using a single template layer
+coverage <- exactextractr::coverage_fraction(alphaearth_rast_proj[[1]], crown_land_3111) |> rast()
+names(coverage) <- "prop_pred"
+
+# 0 -> NA (outside crown land)
+coverage <- ifel(coverage == 0, NA, coverage)
+
+# mask all 64 layers in one go
+alphaearth_rast_proj_masked <- mask(alphaearth_rast_proj, coverage)
+alphaearth_rast_proj_masked_df <- as.data.frame(alphaearth_rast_proj_masked) %>% as.matrix()
+
+coverage_synced <- mask(coverage, alphaearth_rast_proj[[1]])
+prop_pred_ae <- values(coverage_synced)
+prop_pred_ae <- prop_pred_ae[!is.na(prop_pred_ae)]
+
+length(prop_pred_ae)
+cells_in_mask <- global(!is.na(alphaearth_rast_proj_masked[[1]]), "sum")[[1]]
+
+# === FAST, CONSISTENT COUNTS ===
+# Compare against the first masked layer (same mask as coverage), not complete rows across all 64 layers
+sum(prop_pred_ae)
+length(prop_pred_ae)         # should equal:
+cells_in_mask                # this
+
+# sampled data 
+vals_matrix <- vals_sf %>% 
+  st_drop_geometry()
+
+# get region for new predictions
+
+  vic_model_data_resampled_df <- terra::as.data.frame(alphaearth_rast_proj_masked, 
+                                                      xy = TRUE, cell = TRUE, na.rm = TRUE)
+
+  br <- vicmap_query("open-data-platform:delwp_region") %>%
+    collect() %>%
+    dplyr::group_by(delwp_region) %>%
+    dplyr::summarise(geometry = sf::st_combine(geometry)) %>%
+    dplyr::ungroup() %>%
+    # dplyr::arrange(bioregion) %>%
+    dplyr::mutate(delwp_region_fact = as.integer(factor(delwp_region))) %>%
+    sf::st_transform(3111)
+
+  pred_reg_i <-  vic_model_data_resampled_df %>%
+    sf::st_as_sf(., coords = c("x", "y"), crs = 3111) %>%
+    sf::st_nearest_feature(br)
+  
+  pred_reg <- br$delwp_region_fact[pred_reg_i]
+  
+  #bioregion
+    bioreg <- vicmap_query("open-data-platform:vbioreg100") %>%
+      collect() %>%
+    dplyr::group_by(bioregion) %>%
+    dplyr::summarise(geometry = sf::st_combine(geometry)) %>%
+    dplyr::ungroup() %>%
+    # dplyr::arrange(bioregion) %>%
+    dplyr::mutate(bioregion_fact1 = as.integer(factor(bioregion))) %>%
+    sf::st_transform(3111)
+    
+      #get bioregion class of sampled data
+  site_bioreg_test <- sf::st_join(vals_sf %>% st_transform(3111), bioreg) %>%
+    dplyr::pull(bioregion_fact1)
+
+  bc_filtered <- bioreg %>%
+    dplyr::filter(bioregion_fact1 %in% site_bioreg_test) %>%
+    dplyr::mutate(bioregion_fact = as.integer(factor(bioregion)))
+
+  bioreg_reg_i <-  vic_model_data_resampled_df %>%
+    sf::st_as_sf(., coords = c("x", "y"), crs = 3111) %>%
+    sf::st_nearest_feature(bc_filtered)
+  
+  pred_bioreg <- bioreg$bioregion_fact1[bioreg_reg_i]
+  
+  X_psi <- cbind(Intercept = 1, vals_matrix)
+  X_pred_psi <- cbind(Intercept = 1, alphaearth_rast_proj_masked_df)
+
+# multispecies_data_ae <- multispecies_data
+multispecies_data_ae$m_psi <- ncol(X_psi)
+multispecies_data_ae$X_psi <- as.matrix(X_psi)
+multispecies_data_ae$npc <- cells_in_mask
+multispecies_data_ae$X_pred_psi <- X_pred_psi
+multispecies_data_ae$prop_pred <- prop_pred_ae
+multispecies_data_ae$pred_reg <- pred_reg
+multispecies_data_ae$pred_bioreg <- pred_bioreg
+
+### Horseshoe Priors ###
+# inputs
+m_psi   <- 65        # 1 intercept + 64 AE dims
+n_site  <- nrow(X_psi)
+D  <- ncol(X_psi) - 1              # number of slopes
+N  <- nrow(X_psi)
+p0 <- 5L                           # prior guess of nonzero slopes (smaller = stronger shrink)
+tau0 <- (p0 / (D - p0)) / sqrt(N)  # Piironen & Vehtari
+
+multispecies_data_ae$hs_df           <- 1
+multispecies_data_ae$hs_scale        <- 1.0   # was 2.0; tighter slab
+multispecies_data_ae$hs_global_scale <- max(tau0, 1e-3)  # guard very tiny N
+
+
+# example numbers:
+# if n_site = 200 and p0 = 10 -> tau0 ≈ (10/54)/sqrt(200) ≈ 0.0129
+
+
+saveRDS(multispecies_data_ae, "data/alphaearth/multispecies_data_ae.rds")
+```
+
+```{r}
+# abundance covs 
+
+alphaearth_rast_proj <- rast("data/alphaearth/alphaearth_rast_proj.tif")
+# --- 0. Your raster -----------------------------------------------------------
+# alphaearth_rast_proj is your SpatRaster with 64 layers A00..A63
+r <- alphaearth_rast_proj
+
+# --- 1. Sample pixels ---------------------------------------------------------
+set.seed(2025)
+
+# sample e.g. 50,000 non-NA cells (drop to 10k if slow)
+samp <- spatSample(
+  r,
+  size   = 50000,
+  method = "random",
+  na.rm  = TRUE,
+  as.df  = TRUE
+)
+
+# pull only the raster bands as a matrix (n_sample x 64)
+X <- as.matrix(samp[, names(r)])
+
+# --- 2. PCA on the 64 bands ---------------------------------------------------
+pca <- prcomp(X, center = TRUE, scale. = TRUE)
+
+# optional: inspect variance explained
+# print(summary(pca)$importance[, 1:10])
+
+# --- 3. For top PCs, pick band with largest |loading| -------------------------
+loadings <- pca$rotation  # variables x PCs (64 x 64)
+k <- 10                   # look at first 10 PCs (tweak if you like)
+top_pcs <- 1:k
+
+best_by_pc <- sapply(top_pcs, function(pc) {
+  col <- loadings[, pc]
+  names(col)[which.max(abs(col))]
+})
+
+best_by_pc   # candidate band names (with repeats if some PCs pick same band)
+
+cand <- unique(best_by_pc)
+cat("Candidate bands from PCs:\n")
+print(cand)
+
+# --- 4. Thin candidates by correlation to get ~5 diverse bands ---------------
+# compute correlation among candidate bands using the same sample
+X_cand <- X[, cand, drop = FALSE]
+cor_mat <- cor(X_cand)
+
+# greedy thinning: keep bands with |cor| < threshold wrt already kept bands
+threshold <- 0.9  # tighten to 0.85, relax to 0.95 if needed
+keep <- character(0)
+
+for (v in cand) {
+  if (length(keep) == 0) {
+    keep <- c(keep, v)
+  } else {
+    cors_to_keep <- abs(cor_mat[v, keep])
+    if (all(cors_to_keep < threshold)) {
+      keep <- c(keep, v)
+    }
+  }
+}
+
+# if you want strictly 5, you can truncate:
+# if (length(keep) > 5) {
+#   keep <- keep[1:5]
+# }
+
+cat("Selected AlphaEarth bands:\n")
+print(keep)
+```
+
+
+```{r}
+pred_raster_interp <- rast(prediction_raster)
+library(terra)
+
+# 1. Project / resample pred_raster_interp to the AlphaEarth grid ----------
+# (Assumes alphaearth_rast_proj and alphaearth_rast_proj_masked share the same grid)
+pred_raster_proj <- terra::project(
+  pred_raster_interp,
+  alphaearth_rast_proj,
+  method = "bilinear"
+)
+
+# Optional but often safer: force exact grid alignment via resample
+pred_raster_proj <- terra::resample(
+  pred_raster_proj,
+  alphaearth_rast_proj,
+  method = "bilinear"
+)
+
+# 2. Mask to the same footprint as alphaearth_rast_proj_masked -------------
+# Use any layer of the masked AlphaEarth stack as the mask (first layer is fine)
+mask_layer <- alphaearth_rast_proj[[1]]
+
+pred_raster_proj_masked <- terra::mask(
+  pred_raster_proj,
+  mask_layer
+)
+
+# 3. Convert to data frame with same cell set as AlphaEarth masked ---------
+# This should now yield the same number of rows as:
+# terra::as.data.frame(alphaearth_rast_proj_masked, xy = TRUE, cell = TRUE, na.rm = TRUE)
+pred_raster_df <- terra::as.data.frame(
+  pred_raster_proj_masked,
+  xy   = TRUE,
+  cell = TRUE,
+  na.rm = F
+)
+
+# Check row count
+nrow(pred_raster_df)  # should be ~122815
+
+# 4. Build the prediction model matrix -------------------------------------
+# Assumes pred_raster_df has columns:
+#   BareSoil, Nitrogen, PastureDistance, BIO15, ForestEdge
+ab_formula_3 <- ~ scale(sqrt(BareSoil)) +
+                 scale(sqrt(Nitrogen)) +
+                 scale(log(PastureDistance)) +
+                 scale(BIO15) +
+                 scale(sqrt(ForestEdge))
+
+X_pred_ab <- model.matrix(ab_formula_3, data = pred_raster_df)
+
+# X_pred_ab is your design matrix for abundance predictions
+# pred_raster_df[, c("cell", "x", "y")] lets you map predictions back to space
+
+```
+
+
+```{r}
+multispecies_data_ae <- readRDS("data/alphaearth/multispecies_data_ae.rds")
+# add in abundance covariates 
+
+multispecies_data_ae$X_psi_abundance <- multispecies_data[["X_psi"]][,colnames(X_pred_ab)[2:6]]
+multispecies_data_ae$X_pred_psi_abundance <- X_pred_ab[,2:6]
+multispecies_data_ae$m_psi_abundance <- length(5)
+```
+
+
 ### Note on assigning species to deer sign detections  
 
 The recorded deer sign data (pellets, footprints, rubbings and wallows) were not identifiable to deer species. Fresh pellets can be identified to species using genetic sequencing. It is also possible to identify deer species from pellets using visual structure, but this is challenging. Given the variation in surveyors and the uncertainty in visual assignment, we instead assigned species post-hoc via a set of logical steps to minimise false detections of species outside their known range. The known range was determined by creating a kernel density estimate (KDE) of species records over the past 30 years from incidental sightings recorded in the Atlas of Living Australia (ALA). The KDE had a bandwidth determined via the normal reference distribution and was thresholded so that 99.5% of observations fell within the KDE polygon. For a given deer sign detection at a site, we assigned that observation to a given species based on the following stepwise logic:  
@@ -280,7 +615,7 @@ Below we list the MCMC setting for our model. We run models on eight parallel ch
 # STAN settings
 ni <- 200 # sampling iterations
 nw <- 200 # warm-up iterations 
-nc <- 8 # number of chains
+nc <- 6 # number of chains
 ```
 
 ## Read in Models
@@ -301,6 +636,8 @@ The second model uses the combination of bioregion and EVC as random-effects on 
 model_negbin_ms_co <- cmdstan_model(here::here("stan", "count_only_negbin_ms.stan"))
 model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"), 
                             include_paths=gptools_include_path())
+model_negbin_ms_gs <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_gs.stan"), 
+                            include_paths=gptools_include_path())
 model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
 
 # update NINB model: 
@@ -319,6 +656,12 @@ model_poisson_ms_bioreg <- cmdstan_model(here::here("stan", "count_det_nondet_po
 model_negbin_ms_bioreg <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_bioreg.stan"), 
                             include_paths=gptools_include_path())
 
+model_alphaearth <- cmdstan_model(here::here("stan", "poisson_alphaearth.stan"))
+model_alphaearth_hs <- cmdstan_model(here::here("stan", "poisson_alphaearth_hs.stan"))
+zip_alphaearth_hs <- cmdstan_model(here::here("stan", "zip_alphaearth_hs.stan"))
+
+zip_binom_hs_bioreg <- cmdstan_model(here::here("stan", "zip_binom_hs_bioreg.stan"))
+zinb_binom_nohs_bioreg <- cmdstan_model(here::here("stan", "zinb_binom_nohs_bioreg2.stan"))
 ```
 
 ## Fit models
@@ -477,6 +820,269 @@ We can fit models using the `cmdstanr` R package [@cmdstanr]. Here we fit models
 -   Model with several key abundance covariates and hazard-rate detection function and bioregion + EVC random effect
 
 To avoid re-running models this chunk is not evaluated by default and the models are saved as rds objects
+
+```{r fixedgsmodel, eval = F}
+# Run the models and assign them to an element in a list matching the rows for the 'models_to_run' data.frame
+  
+  form_to_use <- ab_formula_3
+  
+  params_to_use <- c(TRUE, labels(terms(ab_formula_1)) %in% labels(terms(form_to_use)))
+  
+  data_to_use <- multispecies_gp_data
+  
+  data_to_use$X_psi <- as.matrix(data_to_use$X_psi[,params_to_use])
+  data_to_use$X_pred_psi <- as.matrix(data_to_use$X_pred_psi[,params_to_use])
+  data_to_use$m_psi <- sum(params_to_use)
+  
+  data_to_use$keyfun <- 1
+
+  model_gs_fit <- model_negbin_ms_gs$sample(data = data_to_use,
+                                         chains = nc,
+                                 parallel_chains = nc, 
+                                 init = 0.1, 
+                                 max_treedepth = 10, 
+                                 adapt_delta = 0.95,
+                                 refresh = 25, 
+                                 show_messages = TRUE,
+                                 show_exceptions = FALSE,
+                                 save_warmup = FALSE,
+                                 iter_sampling = ni, 
+                                 iter_warmup = nw)
+
+
+
+gc()
+model_gs_fit$draws()
+try(model_gs_fit$sampler_diagnostics(), silent = TRUE) # Load sampler diagnostics.
+try(model_gs_fit$init(), silent = TRUE) # Load user-defined initial values.
+try(model_gs_fit$profiles(), silent = TRUE) # Load profiling samples.
+
+# Save the object to a file.
+qs2::qs_save(object = model_gs_fit, 
+             file = "outputs/models/model_gs_fit.qs") 
+
+gc()
+```
+
+```{r alphaearthmodel, eval = T}
+multispecies_data_ae$keyfun <- 1
+S <- multispecies_data_ae$S
+hs_global_scale <- multispecies_data_ae$hs_global_scale
+hs_scale <- multispecies_data_ae$hs_scale
+
+init_fun <- function() {
+  with(multispecies_data_ae, {
+    list(
+      # array[S] vector[m_psi] beta_psi;
+      # small random values, centred near 0
+      beta_psi = matrix(
+        rnorm(S * m_psi, 0, 0.1),
+        nrow = S, ncol = m_psi
+      ),
+      
+       beta_psi_abundance = matrix(
+        rnorm(S * m_psi_abundance, 0, 0.1),
+        nrow = S, ncol = m_psi_abundance
+      ),
+
+      # real<lower=0> sigma_beta;
+      sigma_beta = 0.5,
+
+      # vector[det_ncb] beta_det;
+      beta_det = rep(0, det_ncb),
+
+      # array[S] real beta_occ;
+      # start counts intercepts near 0 (mean ~1 on original scale)
+      beta_occ = rep(0, S),
+
+      # real log_theta;
+      log_theta = 0,
+
+      # vector[trans_det_ncb] beta_trans_det;
+      beta_trans_det = rep(0, trans_det_ncb),
+
+      # real<lower=0, upper=1> activ;
+      # start at prior mean (or just 0.5)
+      activ = bshape / (bshape + bscale),
+
+      # array[S] vector[n_gs] zeta;
+      zeta = matrix(
+        rnorm(S * n_gs, 0, 0.1),
+        nrow = S, ncol = n_gs
+      ),
+
+      # array[S] matrix[n_site, n_gs] eps_raw;
+      eps_raw = array(
+        rnorm(S * n_site * n_gs, 0, 0.1),
+        dim = c(S, n_site, n_gs)
+      ),
+
+      # array[S] real<lower=0> grp_sd;
+      grp_sd = rep(0.3, S),
+
+      # array[S] real<lower=0> bioregion_sd;
+      bioregion_sd = rep(0.3, S),
+
+      # array[S] vector[np_bioreg] bioregion_raw;
+      bioregion_raw = matrix(
+        0,
+        nrow = S, ncol = np_bioreg
+      ),
+
+      # vector[S] log_phi;  NB2 dispersion
+      # centre on prior mean phi ≈ 5
+      log_phi = log(5)
+    )
+  })
+}
+
+
+
+model_ae_fit <- zinb_binom_nohs_bioreg$sample(
+  data            = multispecies_data_ae,
+  chains          = nc,
+  parallel_chains = nc,
+  init            = init_fun,
+  seed            = 20251031,
+
+  iter_warmup     = nw,
+  iter_sampling   = ni,
+
+  adapt_delta     = 0.80,   # start here; bump to 0.85–0.9 only if divergences
+  max_treedepth   = 10,     # fine given model size
+  metric          = "diag_e",  # faster than dense for big models
+
+  refresh         = 10,
+  show_messages   = TRUE,
+  show_exceptions = FALSE,
+  save_warmup     = FALSE
+)
+
+
+gc()
+model_ae_fit$draws()
+try(model_ae_fit$sampler_diagnostics(), silent = TRUE) # Load sampler diagnostics.
+try(model_ae_fit$init(), silent = TRUE) # Load user-defined initial values.
+try(model_ae_fit$profiles(), silent = TRUE) # Load profiling samples.
+
+# Save the object to a file.
+qs2::qs_save(object = model_ae_fit, 
+             file = "outputs/models/model_ae_fit_full.qs") 
+
+gc()
+```
+
+
+```{r zipfit, eval=FALSE}
+# --- 0) assume you already did:
+# zip_alphaearth_hs <- cmdstan_model(here::here("stan", "zip_alphaearth_hs.stan"))
+# and you have your data list as `multispecies_data_ae`
+
+# --- 1) Make a working copy and standardise slopes (cols 2:m_psi), intercept col stays 1s
+d <- multispecies_data_ae
+stopifnot(ncol(d$X_psi) == d$m_psi, ncol(d$X_pred_psi) == d$m_psi)
+
+mu <- colMeans(d$X_psi[, -1, drop = FALSE])
+sd <- apply(d$X_psi[, -1, drop = FALSE], 2, sd)
+# guard against zero-variance columns
+sd[sd == 0] <- 1
+
+d$X_psi[, -1]      <- scale(d$X_psi[, -1, drop = FALSE], center = mu, scale = sd)
+d$X_pred_psi[, -1] <- scale(d$X_pred_psi[, -1, drop = FALSE], center = mu, scale = sd)
+
+# Effort must be integer (your Stan data uses 'int')
+d$effort <- as.integer(round(d$effort))
+
+# --- 2) Regularized horseshoe defaults
+D  <- ncol(d$X_psi) - 1                 # number of slopes (excl. intercept)
+N  <- nrow(d$X_psi)
+p0 <- min(10L, max(1L, floor(D/5)))     # prior guess of nonzero slopes
+
+d$hs_df           <- 1
+d$hs_scale        <- 1.0                # tighter slab for a pilot
+d$hs_global_scale <- (p0 / (D - p0)) / sqrt(N)  # Piironen & Vehtari tau0
+
+# --- 3) Complete, gentle inits (shapes match the Stan parameters)
+init_fun <- function(chain_id = 1) {
+  S      <- d$S
+  m_psi  <- d$m_psi
+  n_site <- d$n_site
+  n_gs   <- d$n_gs
+  det_p  <- d$det_ncb
+  tdet_p <- d$trans_det_ncb
+
+  list(
+    # RHS head (intercept unregularised; slopes regularised)
+    beta_psi_intercept = rep(0, S),
+    z_psi      = matrix(rnorm(S * (m_psi - 1), 0, 0.05), nrow = S, ncol = m_psi - 1),
+    lambda_psi = matrix(runif(S * (m_psi - 1), 0.7, 1.3), nrow = S, ncol = m_psi - 1),
+    tau_psi    = rep(d$hs_global_scale, S),
+    c2_psi     = rep(d$hs_scale^2, S),
+
+    # detection / other params
+    beta_det       = rep(0, det_p),
+    beta_trans_det = rep(0, tdet_p),
+    beta_occ       = rep(0, S),      # not used in the ZIP but harmless to init
+
+    log_theta  = 0,
+    activ      = plogis(0),
+
+    # group-size mixture
+    zeta    = matrix(rnorm(S * n_gs, 0, 0.05), nrow = S, ncol = n_gs),
+    eps_raw = array(rnorm(S * n_site * n_gs, 0, 0.05), dim = c(S, n_site, n_gs)),
+    grp_sd  = rep(0.3, S)
+  )
+}
+
+# --- 4) Short test run
+nc <- min(4L, max(1L, parallel::detectCores() - 1L))
+
+fit_zip <- zip_alphaearth_hs$sample(
+  data = d,
+  chains = nc,
+  parallel_chains = nc,
+  seed = 20251031,
+  iter_warmup   = 300,          # short, but enough to shake out issues
+  iter_sampling = 200,          # short test draw
+  adapt_delta   = 0.90,         # moderate
+  max_treedepth = 10,           # keep compute bounded
+  metric        = "diag_e",     # fast for a pilot
+  init = init_fun,
+  refresh = 25,
+  show_messages = TRUE,
+  show_exceptions = TRUE,
+  save_warmup = FALSE
+)
+
+# --- 5) Quick checks
+fit_zip$cmdstan_diagnose()
+
+# Inspect a few key params to ensure scales look sane
+print(
+  fit_zip$summary(variables = c(
+    "beta_psi_intercept", "tau_psi", "grp_sd",
+    "beta_det[1]", "log_theta", "activ"
+  )),
+  n = Inf
+)
+
+fit_zip$draws()
+try(fit_zip$sampler_diagnostics(), silent = TRUE) # Load sampler diagnostics.
+try(fit_zip$init(), silent = TRUE) # Load user-defined initial values.
+try(fit_zip$profiles(), silent = TRUE) # Load profiling samples.
+
+# Save the object to a file.
+qs2::qs_save(object = fit_zip, 
+             file = "outputs/models/fit_zip.qs") 
+
+gc()
+
+# If you want to peek at prediction scale quickly:
+# pred_sum <- fit_zip$summary(variables = "pred", "mean")
+# head(pred_sum)
+
+```
+
 
 ```{r gpmodel, eval = FALSE}
 # Run the models and assign them to an element in a list matching the rows for the 'models_to_run' data.frame
@@ -1100,9 +1706,9 @@ writeRaster(combined_sd_raster, "outputs/rasters/combined_deer_sd.tif", overwrit
 #     VicmapR::collect() %>%
 #   sf::st_transform(3111) %>%
 #   sf::st_simplify(dTolerance = 250) 
-state <- VicmapR::vicmap_query("open-data-platform:vmlite_victoria_polygon_su5") %>%
+state <- vicmap_query("open-data-platform:vmlite_victoria_polygon_su5") %>%
   filter(state != "NSW" & state != "SA" & feature_type_code != "sea") %>%
-  VicmapR::collect() %>%
+  collect() %>%
   sf::st_transform(3111)
 
 gippsland <- vic_regions %>% filter(delwp_region == "GIPPSLAND")
@@ -1117,12 +1723,13 @@ plot_abundance <- function(raster, state, species, crop = NULL) {
   lvls <- length(unique(values(raster, na.rm = T)))
   
   plot <- ggplot2::ggplot() +
-    ggplot2::geom_sf(data = state, alpha = 1, linewidth = 0.5, fill = "grey90") + 
+
     tidyterra::geom_spatraster(data = raster, na.rm = T) + 
     # tidyterra::scale_fill_terrain_d(na.translate = FALSE) + 
     ggplot2::scale_fill_manual(values = delwp_pal(lvls), na.value = "transparent", na.translate = F) +
     ggplot2::labs(fill = bquote('Deer per'~km^2)) + 
     ggspatial::annotation_scale() +
+    ggplot2::geom_sf(data = state, alpha = 1, linewidth = 0.5, fill = "grey90") + 
     delwp_theme()
   
   return(plot)
