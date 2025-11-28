@@ -66,3 +66,4 @@ data/TREE_DENSITY/TREE_DENSITY.shx
 data/TREE_DENSITY/tree_density_column_names.txt
 outputs/models/fit_multispecies_all_pred_3.rds
 *.qs
+outputs/models/fit_multispecies_co_3.rds

@@ -244,9 +244,8 @@ The second model uses the combination of bioregion and EVC as random-effects on 
 ```
 
 ```{r models, echo = FALSE, warning=FALSE, include=FALSE}
-model_negbin_ms_co <- cmdstan_model(here::here("stan", "count_only_negbin_ms.stan"))
+model_negbin_ms_co <- cmdstan_model(here::here("stan", "count_only_negbin_ms2.stan"))
 model_negbin_ms <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms.stan"))
-model_negbin_ms_evc <- cmdstan_model(here::here("stan", "count_det_nondet_negbin_ms_evc.stan"))
 ```
 
 ## Fit models
@@ -518,6 +517,7 @@ Note that model exploration and tuning was much more extensive than presented he
 # assign index for top model
 top <- 3
 ```
+
 
 ## Posterior predictive checks
 
@@ -987,12 +987,12 @@ plot_abundance <- function(raster, state, species, crop = NULL) {
   lvls <- length(unique(values(raster, na.rm = T)))
   
   plot <- ggplot2::ggplot() +
-    ggplot2::geom_sf(data = state, alpha = 1, linewidth = 0.5, fill = "grey90") + 
     tidyterra::geom_spatraster(data = raster, na.rm = T) + 
     # tidyterra::scale_fill_terrain_d(na.translate = FALSE) + 
     ggplot2::scale_fill_manual(values = delwp_pal(lvls), na.value = "transparent", na.translate = F) +
     ggplot2::labs(fill = bquote('Deer per'~km^2)) + 
     ggspatial::annotation_scale() +
+    ggplot2::geom_sf(data = state, alpha = 0.1, linewidth = 0.5, fill = "grey90") + 
     delwp_theme()
   
   return(plot)
@@ -1275,7 +1275,6 @@ plot_threshold <- function(raster, state, crop = NULL) {
   # lvls <- length(unique(values(raster, na.rm = T)))
   
   plot <- ggplot2::ggplot() +
-    ggplot2::geom_sf(data = state, alpha = 1, linewidth = 0.5, fill = "grey98") + 
     tidyterra::geom_spatraster(data = raster, aes(alpha = after_stat(value), 
                                                   fill = after_stat(value)), na.rm = T) + 
     # tidyterra::scale_fill_terrain_d(na.translate = FALSE) + 
@@ -1287,6 +1286,7 @@ plot_threshold <- function(raster, state, crop = NULL) {
                                 na.translate = F) +
     ggplot2::labs(alpha = "Distribution range", fill = "Distribution range") +
     ggspatial::annotation_scale() +
+    ggplot2::geom_sf(data = state, alpha = 0.1, linewidth = 0.5, fill = "grey98") + 
     delwp_theme()
   
   return(plot)
@@ -1547,7 +1547,7 @@ At a site, there are three processes that may lead us to not record deer on a ca
 
 ### Distance-sampling
 
-Below we show the average detection rate for a given group of deer in front of the camera (up to 12.5m).
+Below we show the average detection rate for a given group of deer in front of the camera (up to 12.5m). The average group sizes for the four species `r paste(round(model_fits[[top]]$summary("av_gs")$mean, 2), collapse = ", ")`.
 
 ```{r AverageDetectionRates}
 det_rates <- model_fits[[top]]$summary("p") %>%
